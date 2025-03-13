@@ -34,11 +34,17 @@ A command-line tool that generates SRT subtitle files from video files using Ope
    - On macOS: `brew install ffmpeg`
    - On Ubuntu: `sudo apt-get install ffmpeg`
    - On Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
-4. Set up your OpenAI API key as an environment variable:
-   ```
-   export OPENAI_API_KEY='your-api-key'
-   ```
-   Or add it to a `.env` file in the same directory.
+4. Set up your OpenAI API key:
+   - Create a `.env` file in the same directory as the script (copy from `.env.example`)
+   - Add your OpenAI API key to the `.env` file:
+     ```
+     OPENAI_API_KEY='your_actual_api_key_here'
+     ```
+   - You can get an API key from [OpenAI's platform](https://platform.openai.com/api-keys)
+   - Alternatively, you can set it as an environment variable:
+     ```
+     export OPENAI_API_KEY='your_actual_api_key_here'
+     ```
 
 ## Directory Structure
 

@@ -168,9 +168,9 @@ def main():
     args = parser.parse_args()
 
     # Verify OpenAI API key
-    api_key = os.getenv("OPENAI_API_KEY_ANDRES") or os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print("Error: Please set the OPENAI_API_KEY or OPENAI_API_KEY_ANDRES environment variable.")
+        print("Error: Please set the OPENAI_API_KEY environment variable.")
         exit(1)
 
     # Create output directory
