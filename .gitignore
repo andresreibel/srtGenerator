@@ -3,6 +3,17 @@
 
 # Generated files
 output_srt_files/
+output*/
+*_output/
+*.srt
+*.vtt
+*.sbv
+*.ass
+*.ssa
+*.sub
+*.json
+
+# Media files
 *.mp4
 *.mov
 *.MOV
@@ -11,7 +22,10 @@ output_srt_files/
 *.m4a
 *.mp3
 *.wav
-*.srt
+*.ogg
+*.flac
+*.aac
+*.opus
 
 # Temporary files
 temp/
