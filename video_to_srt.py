@@ -41,31 +41,62 @@ def convert_to_audio(input_path, output_path, bitrate="128k"):
 def get_duration(input_path):
     """Get the duration of an audio or video file in seconds using ffmpeg."""
     try:
+        # Use ffprobe instead of ffmpeg for more reliable duration extraction
+        command = [
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            input_path
+        ]
+        result = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.stdout.strip():
+            total_seconds = float(result.stdout.strip())
+            print(f"Detected duration: {total_seconds:.2f} seconds")
+            return total_seconds
+
+        # Fallback to the original method if ffprobe doesn't work
         result = subprocess.run(
             ['ffmpeg', '-i', input_path], stderr=subprocess.PIPE, text=True)
         duration_line = [line for line in result.stderr.split(
-            '\n') if 'Duration' in line][0]
-        duration = duration_line.split(',')[0].split(' ')[1]
+            '\n') if 'Duration' in line]
+        if not duration_line:
+            print("Could not find duration information in ffmpeg output")
+            return None
+
+        duration = duration_line[0].split(',')[0].split(' ')[1]
         h, m, s = duration.split(':')
         total_seconds = int(h) * 3600 + int(m) * 60 + float(s)
         return total_seconds
     except Exception as e:
         print(f"Error getting duration: {e}")
+        print(f"Full error: {str(e)}")
         return None
 
 
 def chunk_audio(input_path, output_dir, chunk_duration=600):
     """Split audio into chunks of specified duration (in seconds)."""
+    print(f"Attempting to chunk audio file: {input_path}")
+    print(f"Output directory for chunks: {output_dir}")
+    print(f"Chunk duration: {chunk_duration} seconds")
+
     duration = get_duration(input_path)
     if duration is None:
+        print("Failed to get duration, cannot chunk audio")
         return []
 
     chunk_paths = []
     num_chunks = int(duration // chunk_duration) + \
         (1 if duration % chunk_duration else 0)
+    print(
+        f"File duration: {duration:.2f} seconds, creating {num_chunks} chunks")
+
     for i in range(num_chunks):
         start_time = i * chunk_duration
         output_path = os.path.join(output_dir, f"chunk_{i}.mp3")
+        print(
+            f"Creating chunk {i+1}/{num_chunks} starting at {start_time:.2f} seconds")
         command = [
             'ffmpeg',
             '-i', input_path,
@@ -77,9 +108,20 @@ def chunk_audio(input_path, output_dir, chunk_duration=600):
             '-y',
             output_path
         ]
-        subprocess.run(command, check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        chunk_paths.append(output_path)
+        try:
+            subprocess.run(command, check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            chunk_size = os.path.getsize(output_path) / (1024 * 1024)
+            print(f"Created chunk {i+1}: {output_path} ({chunk_size:.2f} MB)")
+            chunk_paths.append(output_path)
+        except subprocess.CalledProcessError as e:
+            print(f"Error creating chunk {i+1}: {e}")
+            print(f"Command: {' '.join(command)}")
+            if e.stderr:
+                print(
+                    f"Error output: {e.stderr.decode('utf-8', errors='replace')}")
+
+    print(f"Successfully created {len(chunk_paths)} chunks")
     return chunk_paths
 
 
