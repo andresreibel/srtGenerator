@@ -163,6 +163,8 @@ def main():
                         help="Target language for translation. Default is English")
     parser.add_argument("--adjust-timestamps", action="store_true",
                         help="Adjust timestamps based on translated text length")
+    parser.add_argument(
+        "--output-dir", help="Custom output directory for SRT files (default: output_srt_files)")
     args = parser.parse_args()
 
     # Verify OpenAI API key
@@ -171,27 +173,23 @@ def main():
         print("Error: Please set the OPENAI_API_KEY or OPENAI_API_KEY_ANDRES environment variable.")
         exit(1)
 
-    # Create input and output directories
-    os.makedirs("input_video_files", exist_ok=True)
-    os.makedirs("output_srt_files", exist_ok=True)
+    # Create output directory
+    output_dir = args.output_dir if args.output_dir else "output_srt_files"
+    os.makedirs(output_dir, exist_ok=True)
 
     # Determine input file path
     input_file = args.input
-    if not os.path.isabs(input_file) and not input_file.startswith('./'):
-        input_video_path = os.path.join("input_video_files", input_file)
-        if os.path.exists(input_video_path):
-            input_file = input_video_path
 
     # Determine output SRT file path
     target_lang_suffix = f"_{args.target_language}" if args.translate else ""
     timestamp_suffix = "_adjusted" if args.adjust_timestamps else ""
     srt_filename = f"{args.output_name}{target_lang_suffix}{timestamp_suffix}.srt"
-    srt_path = os.path.join("output_srt_files", srt_filename)
+    srt_path = os.path.join(output_dir, srt_filename)
 
     # Check if input file exists
     if not os.path.exists(input_file):
         print(f"Error: Input file '{input_file}' not found.")
-        print("Make sure the file exists or place it in the 'input_video_files' directory.")
+        print("Make sure the file exists or provide the correct path.")
         exit(1)
 
     # Check if output SRT file already exists
@@ -202,11 +200,11 @@ def main():
             exit(0)
 
     # Determine if input is video or audio
-    video_extensions = ['.mp4', '.mkv', '.avi', '.mov']
+    video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.MOV']
     input_ext = os.path.splitext(input_file)[1].lower()
     audio_file_path = input_file
 
-    if input_ext in video_extensions:
+    if input_ext.lower() in [ext.lower() for ext in video_extensions]:
         print(f"Converting video '{input_file}' to audio...")
         with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_audio:
             audio_file_path = tmp_audio.name

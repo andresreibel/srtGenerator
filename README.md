@@ -9,7 +9,8 @@ A command-line tool that generates SRT subtitle files from video files using Ope
 - Translate audio to any language supported by OpenAI's Whisper API
 - Improved two-step translation process for non-English languages that preserves timestamps and subtitle structure
 - Intelligent timestamp adjustment based on translated text length
-- Automatically handle file paths in the correct directories
+- Support for absolute file paths and paths with special characters
+- Custom output directory option
 - Generate properly formatted SRT subtitle files
 
 ## Prerequisites
@@ -41,8 +42,7 @@ A command-line tool that generates SRT subtitle files from video files using Ope
 
 ## Directory Structure
 
-- `input_video_files/`: Place your video files in this directory
-- `output_srt_files/`: Generated SRT files will be saved here
+- `output_srt_files/`: Generated SRT files will be saved here by default
 
 ## Usage
 
@@ -84,6 +84,22 @@ To adjust subtitle timestamps based on translated text length:
 
 ```
 python video_to_srt.py video.mp4 output_name --translate --target-language es --adjust-timestamps
+```
+
+### Using Absolute Paths
+
+You can use absolute paths for input files:
+
+```
+python video_to_srt.py /path/to/your/video.mp4 output_name --translate
+```
+
+### Custom Output Directory
+
+To specify a custom output directory for the SRT files:
+
+```
+python video_to_srt.py video.mp4 output_name --output-dir /path/to/custom/directory
 ```
 
 ## Translation Approaches
