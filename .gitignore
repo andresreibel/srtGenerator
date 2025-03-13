@@ -1,0 +1,36 @@
+# Environment variables
+.env
+
+# Generated files
+output_srt_files/
+input_video_files/*.mp4
+input_video_files/*.mov
+input_video_files/*.MOV
+input_video_files/*.avi
+input_video_files/*.mkv
+input_video_files/*.m4a
+input_video_files/*.mp3
+input_video_files/*.wav
+*.srt
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env/
+*.egg-info/
+dist/
+build/
+
+# OS specific
+.DS_Store
+Thumbs.db
+.directory
