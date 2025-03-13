@@ -8,7 +8,7 @@ import sys
 from openai import OpenAI
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Load environment variables from .env file
 load_dotenv()
@@ -162,12 +162,34 @@ def translate_subtitles(client, subtitles, target_language):
     """Translate subtitles in parallel."""
     print(f"Translating {len(subtitles)} subtitles to {target_language}...")
     start_time = time.time()
+
+    # Set up progress tracking
+    total = len(subtitles)
+    completed = 0
+    print_progress = True
+
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(
-            translate_subtitle, client, subtitle, target_language) for subtitle in subtitles]
-        subtitles = [future.result() for future in futures]
+        futures = {executor.submit(translate_subtitle, client, subtitle, target_language): i
+                   for i, subtitle in enumerate(subtitles)}
+        results = [None] * total
+
+        for future in as_completed(futures):
+            idx = futures[future]
+            results[idx] = future.result()
+            completed += 1
+
+            # Update progress every 5% or at least every 10 items
+            if print_progress and (completed % max(1, min(10, total // 20)) == 0 or completed == total):
+                percent = (completed / total) * 100
+                elapsed = time.time() - start_time
+                est_total = elapsed / \
+                    (completed / total) if completed > 0 else 0
+                remaining = est_total - elapsed
+                print(
+                    f"  Progress: {completed}/{total} ({percent:.1f}%) - Est. remaining: {remaining:.1f}s")
+
     print(f"Translation completed in {time.time() - start_time:.1f} seconds")
-    return subtitles
+    return results
 
 
 def srt_time_to_ms(srt_time):
@@ -443,9 +465,23 @@ def process_with_args(args):
                 print(
                     f"Starting parallel transcription of {len(chunk_files)} chunks...")
                 transcription_start = time.time()
+
+                # Set up progress tracking for transcription
+                total_chunks = len(chunk_files)
+                completed_chunks = 0
+                srt_contents = []
+
                 with ThreadPoolExecutor(max_workers=5) as executor:
-                    srt_contents = list(executor.map(
-                        lambda cf: transcribe_chunk(client, cf, args.language), chunk_files))
+                    futures = {executor.submit(transcribe_chunk, client, cf, args.language): i
+                               for i, cf in enumerate(chunk_files)}
+
+                    for future in as_completed(futures):
+                        srt_contents.append(future.result())
+                        completed_chunks += 1
+                        percent = (completed_chunks / total_chunks) * 100
+                        print(
+                            f"  Transcription progress: {completed_chunks}/{total_chunks} ({percent:.1f}%)")
+
                 print(
                     f"Transcription completed in {time.time() - transcription_start:.1f} seconds")
 
