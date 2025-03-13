@@ -4,16 +4,15 @@ A command-line tool that generates SRT subtitle files from video files using Ope
 
 ## Features
 
-- Convert video files to audio using ffmpeg
+- Interactive CLI menu for easier usage
 - Transcribe audio in its original language
 - Translate audio to any language supported by OpenAI's Whisper API
-- Improved two-step translation process for non-English languages that preserves timestamps and subtitle structure
-- Intelligent timestamp adjustment based on translated text length (enabled by default)
-- Support for absolute file paths and paths with special characters
-- Custom output directory option
-- Audio compression for files larger than 25 MB (enabled by default)
-- Automatic chunking for very large files that exceed OpenAI's 25 MB limit
-- Generate properly formatted SRT subtitle files
+- Support for absolute file paths and paths with special characters (including quoted paths)
+- Intelligent timestamp adjustment based on translated text length
+- Audio compression and chunking for large files
+- Parallel processing for faster transcription
+- Retry logic for API calls
+- Subtitle validation
 
 ## Prerequisites
 
@@ -37,157 +36,111 @@ A command-line tool that generates SRT subtitle files from video files using Ope
    - On Ubuntu: `sudo apt-get install ffmpeg`
    - On Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
 4. Set up your OpenAI API key:
-   - Create a `.env` file in the same directory as the script (copy from `.env.example`)
+   - Create a `.env` file in the same directory as the script
    - Add your OpenAI API key to the `.env` file:
      ```
      OPENAI_API_KEY='your_actual_api_key_here'
      ```
    - You can get an API key from [OpenAI's platform](https://platform.openai.com/api-keys)
-   - Alternatively, you can set it as an environment variable:
-     ```
-     export OPENAI_API_KEY='your_actual_api_key_here'
-     ```
-
-## Directory Structure
-
-- `output_srt_files/`: Generated SRT files will be saved here by default
 
 ## Usage
 
-### Basic Transcription
+### Interactive CLI Menu (Recommended)
 
-To transcribe a video file in its original language:
-
-```
-python video_to_srt.py video.mp4 output_name
-```
-
-### Translation to English
-
-To translate the audio to English:
+The easiest way to use the tool is with the interactive CLI menu:
 
 ```
-python video_to_srt.py video.mp4 output_name --translate
+python video_to_srt.py
 ```
 
-### Translation to Other Languages
+This will guide you through the process with prompts for:
 
-To translate the audio to a specific language (e.g., Spanish):
+- Input file path
+- Output name
+- Source language
+- Target language
+- Output directory
 
-```
-python video_to_srt.py video.mp4 output_name --translate --target-language es
-```
+### Command Line Arguments
 
-### Specify Source Language
-
-If you know the source language, you can specify it for better accuracy:
-
-```
-python video_to_srt.py video.mp4 output_name --language ja
-```
-
-### Disable Timestamp Adjustment
-
-Timestamp adjustment is enabled by default. To disable it:
+#### Basic Usage
 
 ```
-python video_to_srt.py video.mp4 output_name --translate --target-language es --no-adjust-timestamps
+python video_to_srt.py input_file output_name --language source_lang --target-language target_lang
 ```
 
-### Using Absolute Paths
+#### Examples
 
-You can use absolute paths for input files:
-
-```
-python video_to_srt.py /path/to/your/video.mp4 output_name --translate
-```
-
-### Custom Output Directory
-
-To specify a custom output directory for the SRT files:
+Transcribe English audio to English subtitles:
 
 ```
-python video_to_srt.py video.mp4 output_name --output-dir /path/to/custom/directory
+python video_to_srt.py video.mp4 output_name --language en --target-language en
 ```
 
-### Handling Large Files
-
-For files larger than 25 MB (OpenAI's limit), compression is applied automatically.
-To disable automatic compression:
+Transcribe English audio to Spanish subtitles:
 
 ```
-python video_to_srt.py large_video.mp4 output_name --no-compress
+python video_to_srt.py video.mp4 output_name --language en --target-language es
 ```
 
-You can also force compression for smaller files:
+Transcribe Japanese audio to English subtitles:
 
 ```
-python video_to_srt.py video.mp4 output_name --force-compress
+python video_to_srt.py video.mp4 output_name --language ja --target-language en
 ```
 
-For extremely large files that exceed 25 MB even after compression, the script will automatically split the audio into chunks, process each chunk separately, and then merge the results.
+#### Using Paths with Special Characters
 
-## Translation Approaches
+You can use quotes for paths with special characters:
 
-The script uses different approaches depending on the target language:
+```
+python video_to_srt.py '/path/to/your/video with #special characters.mp4' output_name --language en --target-language es
+```
 
-1. **English Translation**: Uses OpenAI's dedicated translations API endpoint, which directly translates all audio content to English.
+#### Custom Output Directory
 
-2. **Non-English Translation**: Uses an improved two-step approach:
-   - First transcribes the audio with timestamps to get an SRT file in the original language(s)
-   - Parses the SRT file to extract subtitle entries with their timestamps
-   - Translates the text of each subtitle entry to the target language using GPT-3.5 Turbo
-   - Optionally adjusts timestamps based on translated text length
-   - Reconstructs the SRT file with the original or adjusted timestamps and translated text
+```
+python video_to_srt.py video.mp4 output_name --language en --target-language es --output-dir /path/to/custom/directory
+```
 
-The improved two-step approach ensures that all content is preserved when translating to non-English languages, maintaining the original subtitle structure and timing.
+## Handling Mixed Language Content
 
-## Large File Handling
+When working with audio that contains multiple languages:
 
-The script includes advanced features for handling large files:
+1. **Identify the primary language** in your audio content
+2. Specify this as the `--language` parameter (or select it in the interactive menu)
+3. Choose your desired `--target-language` for the output subtitles
 
-### Automatic Compression
+This approach ensures that Whisper will treat all speech as if it were in the specified source language, resulting in consistent transcription without language switching in the output.
 
-- Files larger than 25 MB are automatically compressed
-- Uses mono audio with 64k bitrate for efficient size reduction
-- Compression can be disabled with the `--no-compress` flag
+Example for mixed English/Spanish audio where English is dominant:
 
-### Automatic Chunking
+```
+python video_to_srt.py mixed_audio.mp4 output_name --language en --target-language es
+```
 
-For files that still exceed 25 MB after compression:
+## How It Works
 
-1. The audio is split into 10-minute chunks
-2. Each chunk is processed separately with the OpenAI API
-3. The resulting SRT files are merged with proper timestamp adjustments
-4. This allows processing files of any size, regardless of OpenAI's 25 MB limit
+### Translation Process
 
-This chunking process is completely automatic and requires no additional user input.
+1. **Audio Extraction**: Converts video to audio using ffmpeg
+2. **Transcription**: Uses OpenAI's Whisper API to transcribe audio in the source language
+3. **Translation** (if needed): Translates text to the target language using GPT-3.5 Turbo
+4. **Timestamp Adjustment**: Adjusts subtitle durations based on text length
+5. **Validation**: Checks for overlapping subtitles and other issues
 
-## Timestamp Adjustment
+### Large File Handling
 
-The timestamp adjustment feature (enabled by default) modifies subtitle durations based on the ratio between original and translated text lengths. This helps ensure that:
+For files larger than 25 MB (OpenAI's limit):
 
-- Longer translations have more time on screen
-- Shorter translations don't stay on screen too long
-- Subtitles don't overlap
-- A minimum gap (100ms) is maintained between consecutive subtitles
-
-This feature is particularly useful for languages that are significantly longer or shorter than the source language when written.
-
-## Audio Compression
-
-The script includes audio compression features to handle files larger than OpenAI's 25 MB limit:
-
-- For standard compression: Uses mono MP3 with 64k bitrate
-- For forced compression: Uses mono MP3 with 64k bitrate
-- Automatically applied to files larger than 25 MB
-- Can reduce file sizes by 5-10x while maintaining good speech quality for transcription
-
-The compression is optimized for voice content and maintains sufficient quality for accurate transcription.
+1. Audio is compressed to 64k mono MP3
+2. If still too large, audio is split into 10-minute chunks
+3. Each chunk is processed in parallel
+4. Results are merged with proper timestamp adjustments
 
 ## Supported Languages
 
-The script supports all languages supported by OpenAI's Whisper model. Some common language codes:
+The script supports all languages supported by OpenAI's Whisper model. Common language codes:
 
 - English: `en`
 - Spanish: `es`
@@ -199,20 +152,15 @@ The script supports all languages supported by OpenAI's Whisper model. Some comm
 - Portuguese: `pt`
 - Italian: `it`
 
+## Important Notes
+
+- **Always specify the source language** for best results
+- **For mixed language content, specify the primary/dominant language** to avoid inconsistent transcription
+- The default source and target language is English if not specified
+- The maximum audio file size supported by OpenAI's API is 25 MB (handled automatically)
+- The quality of transcription depends on the audio quality and the Whisper model's capabilities
+
 ## Cost Considerations
 
 - **Whisper API**: $0.006 per minute (or $0.36 per hour)
-- **GPT-3.5 Turbo** (used for text translation): Very low cost (approximately $0.01-0.02 for an hour of speech)
-
-For a 1-hour video:
-
-- English translation: ~$0.36
-- Non-English translation: ~$0.378 (slightly higher due to the additional text translation step)
-
-## Notes
-
-- The maximum audio file size supported by OpenAI's API is 25 MB
-- Compression is automatically applied to files larger than 25 MB
-- Files that exceed 25 MB even after compression will be automatically chunked
-- Timestamp adjustment is enabled by default for translated content
-- The quality of transcription and translation depends on the audio quality and the Whisper model's capabilities
+- **GPT-3.5 Turbo** (for translation): ~$0.01-0.02 for an hour of speech

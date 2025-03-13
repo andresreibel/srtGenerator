@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import re
 import time
+import sys
 from openai import OpenAI
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -11,6 +12,22 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Common language codes for reference
+COMMON_LANGUAGES = {
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'it': 'Italian',
+    'pt': 'Portuguese',
+    'ru': 'Russian',
+    'zh': 'Chinese',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'ar': 'Arabic',
+    'hi': 'Hindi'
+}
 
 
 def convert_to_audio(input_path, output_path, bitrate="128k"):
@@ -270,23 +287,110 @@ def transcribe_chunk(client, chunk_file, language):
         return ""
 
 
-def main():
-    total_start_time = time.time()
-    print("Starting video_to_srt_improved.py...")
-    parser = argparse.ArgumentParser(
-        description="Generate consistent SRT files with non-English translations.")
-    parser.add_argument(
-        "input", help="Input file path (e.g., video.mp4, audio.mp3)")
-    parser.add_argument(
-        "output_name", help="Output SRT file name (without extension)")
-    parser.add_argument(
-        "--language", help="Source language (e.g., 'en', 'es')")
-    parser.add_argument("--target-language", default="en",
-                        help="Target language (e.g., 'fr', 'es')")
-    parser.add_argument(
-        "--output-dir", default="output_srt_files", help="Output directory")
-    args = parser.parse_args()
+def display_menu():
+    """Display the interactive CLI menu."""
+    print("\n" + "="*60)
+    print("🎬 SRT Generator - Interactive Menu 🎬".center(60))
+    print("="*60)
+    print("\nThis tool generates SRT subtitle files from video/audio files.")
+    print("All processing features are enabled by default:")
+    print("  ✅ Chunking for large files")
+    print("  ✅ Parallel processing")
+    print("  ✅ Retry logic for API calls")
+    print("  ✅ Timestamp adjustment")
+    print("  ✅ Subtitle validation")
 
+    # Get input file
+    while True:
+        input_file = input(
+            "\n📁 Enter the path to your video/audio file: ").strip()
+        if not input_file:
+            print("❌ Input file path cannot be empty.")
+            continue
+
+        # Handle paths with quotes
+        if (input_file.startswith("'") and input_file.endswith("'")) or \
+           (input_file.startswith('"') and input_file.endswith('"')):
+            input_file = input_file[1:-1]  # Remove surrounding quotes
+
+        if not os.path.exists(input_file):
+            print(f"❌ File not found: '{input_file}'")
+            continue
+        break
+
+    # Get output name
+    while True:
+        output_name = input(
+            "\n💾 Enter the output name (without extension): ").strip()
+        if not output_name:
+            print("❌ Output name cannot be empty.")
+            continue
+        break
+
+    # Get source language with improved guidance
+    print("\n🔤 Source language (language of the audio):")
+    print("   This is the PRIMARY language spoken in your audio.")
+    print("   ⚠️  IMPORTANT: For mixed language content, specify the dominant language.")
+    print("   This ensures consistent transcription without language switching.")
+    print("   Common codes: en (English), es (Spanish), fr (French), etc.")
+    source_language = input(
+        "   Enter source language code [default: en]: ").strip().lower() or "en"
+    if source_language in COMMON_LANGUAGES:
+        print(f"   Selected: {COMMON_LANGUAGES[source_language]}")
+
+    # Get target language with improved guidance
+    print("\n🌐 Target language (language for the subtitles):")
+    print("   This is the language your subtitles will be translated to.")
+    print("   If same as source language, no translation will be performed.")
+    print("   Common codes: en (English), es (Spanish), fr (French), etc.")
+    target_language = input(
+        "   Enter target language code [default: en]: ").strip().lower() or "en"
+    if target_language in COMMON_LANGUAGES:
+        print(f"   Selected: {COMMON_LANGUAGES[target_language]}")
+
+    # Add warning if source and target are different
+    if source_language != target_language:
+        print(
+            f"\n📝 NOTE: Audio will be transcribed from {COMMON_LANGUAGES.get(source_language, source_language)} and translated to {COMMON_LANGUAGES.get(target_language, target_language)}.")
+    else:
+        print(
+            f"\n📝 NOTE: Audio will be transcribed in {COMMON_LANGUAGES.get(source_language, source_language)} with no translation.")
+
+    # Get output directory
+    output_dir = input("\n📂 Enter output directory [default: output_srt_files]: ").strip(
+    ) or "output_srt_files"
+
+    # Handle paths with quotes for output directory
+    if (output_dir.startswith("'") and output_dir.endswith("'")) or \
+       (output_dir.startswith('"') and output_dir.endswith('"')):
+        output_dir = output_dir[1:-1]  # Remove surrounding quotes
+
+    # Confirm settings
+    print("\n" + "-"*60)
+    print("📋 Summary of settings:")
+    print(f"   Input file: {input_file}")
+    print(f"   Output name: {output_name}")
+    print(f"   Source language: {source_language}")
+    print(f"   Target language: {target_language}")
+    print(f"   Output directory: {output_dir}")
+    print("-"*60)
+
+    confirm = input("\n✅ Proceed with these settings? (y/n): ").strip().lower()
+    if confirm != 'y':
+        print("Operation cancelled.")
+        return None
+
+    return {
+        'input': input_file,
+        'output_name': output_name,
+        'language': source_language,
+        'target_language': target_language,
+        'output_dir': output_dir
+    }
+
+
+def process_with_args(args):
+    """Process video/audio with the given arguments."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         print("Error: Set OPENAI_API_KEY in .env file.")
@@ -303,6 +407,8 @@ def main():
 
     temp_files = []
     audio_file_path = None
+    total_start_time = time.time()
+
     try:
         print(f"Processing file: {input_file}")
         client = OpenAI(api_key=api_key)
@@ -384,6 +490,74 @@ def main():
             if os.path.exists(temp_file):
                 os.remove(temp_file)
                 print(f"Cleaned up temporary file: {temp_file}")
+
+
+def main():
+    """Main function with support for both CLI arguments and interactive menu."""
+    print("Starting video_to_srt.py...")
+
+    # Check if any command line arguments were provided
+    if len(sys.argv) > 1:
+        # Use argparse for backward compatibility
+        parser = argparse.ArgumentParser(
+            description="Generate consistent SRT files with non-English translations.")
+        parser.add_argument(
+            "input", help="Input file path (e.g., video.mp4, audio.mp3)")
+        parser.add_argument(
+            "output_name", help="Output SRT file name (without extension)")
+        parser.add_argument(
+            "--language", default="en",
+            help="Source language of the audio (e.g., 'en', 'es'). For mixed language content, specify the dominant language.")
+        parser.add_argument("--target-language", default="en",
+                            help="Target language for the subtitles (e.g., 'fr', 'es')")
+        parser.add_argument(
+            "--output-dir", default="output_srt_files", help="Output directory")
+        parser.add_argument("--interactive", action="store_true",
+                            help="Use interactive menu instead of command line arguments")
+
+        args = parser.parse_args()
+
+        # Handle quoted paths in command-line arguments
+        if args.input and (args.input.startswith("'") and args.input.endswith("'")) or \
+           (args.input.startswith('"') and args.input.endswith('"')):
+            args.input = args.input[1:-1]  # Remove surrounding quotes
+
+        if args.output_dir and (args.output_dir.startswith("'") and args.output_dir.endswith("'")) or \
+           (args.output_dir.startswith('"') and args.output_dir.endswith('"')):
+            # Remove surrounding quotes
+            args.output_dir = args.output_dir[1:-1]
+
+        # Display language information
+        if args.language != args.target_language:
+            if args.language in COMMON_LANGUAGES and args.target_language in COMMON_LANGUAGES:
+                print(
+                    f"\n📝 NOTE: Audio will be transcribed from {COMMON_LANGUAGES[args.language]} and translated to {COMMON_LANGUAGES[args.target_language]}.")
+            else:
+                print(
+                    f"\n📝 NOTE: Audio will be transcribed from '{args.language}' and translated to '{args.target_language}'.")
+        else:
+            if args.language in COMMON_LANGUAGES:
+                print(
+                    f"\n📝 NOTE: Audio will be transcribed in {COMMON_LANGUAGES[args.language]} with no translation.")
+            else:
+                print(
+                    f"\n📝 NOTE: Audio will be transcribed in '{args.language}' with no translation.")
+
+        if args.interactive:
+            menu_args = display_menu()
+            if menu_args:
+                # Convert dict to argparse.Namespace
+                args = argparse.Namespace(**menu_args)
+                process_with_args(args)
+        else:
+            process_with_args(args)
+    else:
+        # No command line args, use interactive menu
+        menu_args = display_menu()
+        if menu_args:
+            # Convert dict to argparse.Namespace
+            args = argparse.Namespace(**menu_args)
+            process_with_args(args)
 
 
 if __name__ == "__main__":
