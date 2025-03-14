@@ -1,23 +1,28 @@
 # Video to SRT Generator
 
-A command-line tool that generates SRT subtitle files from video files using OpenAI's Whisper API. It automatically detects the source language and can translate to any target language.
+A powerful command-line tool that transforms video files into professional-quality SRT subtitles using OpenAI's Whisper API, with automatic language detection and translation capabilities.
 
 ## Features
 
-- Interactive CLI menu for easier usage
-- Automatic language detection for source audio
-- Translation to any language supported by OpenAI's Whisper API
-- Support for absolute file paths and paths with special characters (including quoted paths)
-- Intelligent timestamp adjustment based on translated text length
-- **Content-aware overlap resolution** to fix overlapping subtitles
-- **Long subtitle splitting** for improved readability
-- **Short subtitle extension** for better readability and YouTube compatibility
-- Detailed console output of timestamp adjustments and fixes
-- Audio compression and chunking for large files
-- Parallel processing for faster transcription
-- Retry logic for API calls
-- Subtitle validation
-- **Automatic removal of [inaudible] markers** for cleaner subtitles
+- **Smart Subtitle Processing**:
+
+  - Automatic language detection and translation
+  - Intelligent timestamp adjustment based on text length
+  - Content-aware overlap resolution
+  - Long subtitle splitting for optimal readability
+  - Short subtitle extension for YouTube compatibility
+  - Automatic removal of [inaudible] markers
+
+- **Efficient Processing**:
+
+  - Audio compression and chunking for large files
+  - Parallel processing for faster transcription
+  - Retry logic for API reliability
+
+- **User-Friendly**:
+  - Interactive CLI menu for easy operation
+  - Detailed console output for monitoring
+  - Comprehensive subtitle validation
 
 ## Prerequisites
 
@@ -216,6 +221,7 @@ The script supports all languages supported by OpenAI's Whisper model. Common la
 
 - **Whisper API**: $0.006 per minute (or $0.36 per hour)
 - **GPT-3.5 Turbo** (for translation): ~$0.01-0.02 for an hour of speech
+- **Total cost per hour**: Approximately $0.37-0.38 per hour of processed audio/video
 
 ## YouTube Integration
 
