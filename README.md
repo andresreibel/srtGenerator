@@ -11,6 +11,7 @@ A command-line tool that generates SRT subtitle files from video files using Ope
 - Intelligent timestamp adjustment based on translated text length
 - **Content-aware overlap resolution** to fix overlapping subtitles
 - **Long subtitle splitting** for improved readability
+- **Short subtitle extension** for better readability and YouTube compatibility
 - Detailed console output of timestamp adjustments and fixes
 - Audio compression and chunking for large files
 - Parallel processing for faster transcription
@@ -127,7 +128,8 @@ python video_to_srt.py mixed_audio.mp4 output_name --target-language es
 4. **Timestamp Adjustment**: Adjusts subtitle durations based on text length
 5. **Long Subtitle Splitting**: Intelligently splits long subtitles at natural language boundaries
 6. **Overlap Resolution**: Intelligently fixes overlapping subtitles based on content length and word count
-7. **Validation**: Checks for overlapping subtitles and other issues
+7. **Short Subtitle Extension**: Extends subtitles that are too short for comfortable reading
+8. **Validation**: Checks for overlapping subtitles and other issues
 
 ### Large File Handling
 
@@ -159,6 +161,22 @@ The script automatically splits long subtitles for improved readability:
 5. Maintains proper chronological order and subtitle numbering
 
 This feature significantly improves subtitle readability by breaking long blocks of text into manageable segments while preserving the original meaning and timing.
+
+### Short Subtitle Extension
+
+The script intelligently extends subtitles that are too short for comfortable reading:
+
+1. Calculates a minimum duration threshold based on mean duration and standard deviation (at least 500ms)
+2. Identifies subtitles shorter than this threshold
+3. Analyzes available space before and after each short subtitle
+4. Intelligently extends duration by:
+   - Shifting start time earlier when space is available
+   - Extending end time when space is available
+   - Distributing time adjustments proportionally when space exists in both directions
+   - Removing empty subtitles to create more space when needed
+5. Ensures all subtitles have sufficient duration for viewers to read
+
+This feature significantly improves subtitle readability and YouTube compatibility by ensuring no subtitle appears too briefly on screen. YouTube often rejects SRT files with extremely short subtitles (under 500ms), and this feature automatically fixes such issues.
 
 ### Inaudible Marker Removal
 
