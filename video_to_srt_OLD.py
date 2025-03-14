@@ -107,44 +107,25 @@ def chunk_audio(input_path, output_dir, chunk_duration=600, overlap=5):
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def transcribe_audio(client, audio_file, language=None):
     """Transcribe audio using OpenAI Whisper API with retry logic."""
-    try:
-        transcription_args = {"model": "whisper-1",
-                              "file": audio_file, "response_format": "srt"}
-        if language:
-            transcription_args["language"] = language
-        else:
-            print("Using automatic language detection...")
-
-        response = client.audio.transcriptions.create(**transcription_args)
-        return response
-    except Exception as e:
-        print(f"Transcription error: {str(e)[:100]}. Retrying...")
-        raise  # Re-raise for retry decorator to handle
+    transcription_args = {"model": "whisper-1",
+                          "file": audio_file, "response_format": "srt"}
+    if language:
+        transcription_args["language"] = language
+    return client.audio.transcriptions.create(**transcription_args)
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def translate_text(client, text, target_language):
     """Translate text to the target language using GPT-3.5-turbo with retry logic."""
-    try:
-        # Skip empty text
-        if not text or len(text.strip()) == 0:
-            return text
-
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": f"Translate the following text to {target_language}. Preserve the original meaning and structure."},
-                {"role": "user", "content": text}
-            ],
-            temperature=0.3,
-            timeout=15  # Add timeout in seconds
-        )
-
-        translated_text = response.choices[0].message.content.strip()
-        return translated_text
-    except Exception as e:
-        print(f"Translation API error: {str(e)[:100]}. Retrying...")
-        raise  # Re-raise for retry decorator to handle
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": f"Translate the following text to {target_language}. Preserve the original meaning and structure."},
+            {"role": "user", "content": text}
+        ],
+        temperature=0.3
+    )
+    return response.choices[0].message.content.strip()
 
 
 def parse_srt(srt_content):
@@ -160,8 +141,7 @@ def parse_srt(srt_content):
             'number': lines[0].strip(),
             'timestamp': lines[1].strip(),
             'text': '\n'.join(lines[2:]).strip(),
-            'original_text': '\n'.join(lines[2:]).strip(),
-            'detected_language': None  # Will be populated if available
+            'original_text': '\n'.join(lines[2:]).strip()
         })
     return subtitles
 
@@ -169,30 +149,12 @@ def parse_srt(srt_content):
 def translate_subtitle(client, subtitle, target_language):
     """Translate a single subtitle, used for parallel processing."""
     try:
-        # Skip translation if target language matches detected language
-        # This is an optimization to avoid unnecessary API calls
-        if 'detected_language' in subtitle and subtitle['detected_language'] == target_language:
-            return subtitle
-
-        # Add timeout handling for API calls
-        start_time = time.time()
-        max_time = 15  # Maximum seconds to wait for a single translation
-
-        # Attempt translation
-        translated_text = translate_text(
+        subtitle['text'] = translate_text(
             client, subtitle['text'], target_language)
-
-        # Check if we got a valid response
-        if not translated_text or len(translated_text.strip()) == 0:
-            raise ValueError("Empty translation received")
-
-        subtitle['text'] = translated_text
-
     except Exception as e:
         print(
-            f"Error translating subtitle {subtitle['number']}: {str(e)[:100]}. Using original text.")
+            f"Error translating subtitle {subtitle['number']}: {e}. Using original text.")
         subtitle['text'] = subtitle['original_text']
-
     return subtitle
 
 
@@ -206,78 +168,27 @@ def translate_subtitles(client, subtitles, target_language):
     completed = 0
     print_progress = True
 
-    # Reduce max_workers from 10 to 5 to avoid rate limiting
-    max_workers = 5
-    results = [None] * total
-
-    # Track failed translations to retry them individually
-    failed_indices = []
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all translation tasks
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(translate_subtitle, client, subtitle, target_language): i
                    for i, subtitle in enumerate(subtitles)}
-
-        # Process completed futures with timeout detection
-        last_completion_time = time.time()
-        stalled_threshold = 30  # seconds without progress before considering stalled
+        results = [None] * total
 
         for future in as_completed(futures):
-            try:
-                idx = futures[future]
-                results[idx] = future.result()
-                completed += 1
-                last_completion_time = time.time()
+            idx = futures[future]
+            results[idx] = future.result()
+            completed += 1
 
-                # Update progress every 5% or at least every 10 items
-                if print_progress and (completed % max(1, min(10, total // 20)) == 0 or completed == total):
-                    percent = (completed / total) * 100
-                    elapsed = time.time() - start_time
-                    est_total = elapsed / \
-                        (completed / total) if completed > 0 else 0
-                    remaining = est_total - elapsed
-                    print(
-                        f"  Progress: {completed}/{total} ({percent:.1f}%) - Est. remaining: {remaining:.1f}s")
-
-                # Check for stalled progress
-                if time.time() - last_completion_time > stalled_threshold:
-                    print(
-                        f"⚠️ Translation appears stalled. Continuing with available results...")
-                    break
-
-            except Exception as e:
-                idx = futures[future]
+            # Update progress every 5% or at least every 10 items
+            if print_progress and (completed % max(1, min(10, total // 20)) == 0 or completed == total):
+                percent = (completed / total) * 100
+                elapsed = time.time() - start_time
+                est_total = elapsed / \
+                    (completed / total) if completed > 0 else 0
+                remaining = est_total - elapsed
                 print(
-                    f"Error translating subtitle {idx}: {e}. Using original text.")
-                results[idx] = subtitles[idx]  # Use original subtitle
-                failed_indices.append(idx)
+                    f"  Progress: {completed}/{total} ({percent:.1f}%) - Est. remaining: {remaining:.1f}s")
 
-    # Handle any missing results (should be rare)
-    for i, result in enumerate(results):
-        if result is None:
-            print(
-                f"Missing translation for subtitle {i}. Using original text.")
-            results[i] = subtitles[i]
-
-    # Retry failed translations individually with backoff
-    if failed_indices:
-        print(
-            f"Retrying {len(failed_indices)} failed translations individually...")
-        for idx in failed_indices:
-            try:
-                # Simple backoff - wait a moment before retrying
-                time.sleep(1)
-                results[idx] = translate_subtitle(
-                    client, subtitles[idx], target_language)
-                print(f"Successfully retried translation for subtitle {idx}")
-            except Exception as e:
-                print(
-                    f"Retry failed for subtitle {idx}: {e}. Using original text.")
-                results[idx] = subtitles[idx]
-
-    elapsed = time.time() - start_time
-    print(
-        f"Translation completed in {elapsed:.1f} seconds ({completed}/{total} subtitles)")
+    print(f"Translation completed in {time.time() - start_time:.1f} seconds")
     return results
 
 
@@ -331,49 +242,9 @@ def adjust_timestamps(subtitles, cps=17, min_time=1.0, gap=0.1):
 
 def subtitles_to_srt(subtitles):
     """Convert subtitle list to SRT string."""
-    print("Converting subtitles to SRT format...")
-
-    # Final check to ensure chronological ordering by timestamp
-    subtitles_with_ms = []
-    for subtitle in subtitles:
-        try:
-            start_str = subtitle['timestamp'].split(' --> ')[0]
-            end_str = subtitle['timestamp'].split(' --> ')[1]
-            start_ms = srt_time_to_ms(start_str)
-            end_ms = srt_time_to_ms(end_str)
-            subtitles_with_ms.append((subtitle, start_ms, end_ms))
-        except Exception as e:
-            print(
-                f"⚠️ Warning: Error processing subtitle {subtitle.get('number', 'unknown')}: {e}")
-            # Use a default value to avoid breaking the process
-            subtitles_with_ms.append((subtitle, 0, 0))
-
-    # Sort by start time first, then by end time
-    print("Sorting subtitles by timestamp...")
-    subtitles_with_ms.sort(key=lambda x: (x[1], x[2]))
-
-    # Check for any out-of-order subtitles
-    order_issues = 0
-    for i in range(len(subtitles_with_ms) - 1):
-        if subtitles_with_ms[i][1] > subtitles_with_ms[i+1][1]:
-            order_issues += 1
-
-    if order_issues > 0:
-        print(
-            f"⚠️ Found {order_issues} ordering issues after sorting. This should not happen.")
-    else:
-        print("✅ All subtitles are in strict chronological order")
-
-    # Renumber subtitles sequentially
-    print("Renumbering subtitles...")
-    for i, (subtitle, _, _) in enumerate(subtitles_with_ms, 1):
-        subtitle['number'] = str(i)
-
-    # Generate SRT content
     srt_content = ""
-    for subtitle, _, _ in subtitles_with_ms:
+    for subtitle in subtitles:
         srt_content += f"{subtitle['number']}\n{subtitle['timestamp']}\n{subtitle['text']}\n\n"
-
     return srt_content
 
 
@@ -381,8 +252,6 @@ def merge_srt_files(srt_contents, time_offsets):
     """Merge SRT files with timestamp adjustments and duplicate removal."""
     print("Merging subtitle chunks...")
     all_subtitles = []
-
-    # Process each chunk and adjust timestamps
     for srt_content, offset in zip(srt_contents, time_offsets):
         subtitles = parse_srt(srt_content)
         for subtitle in subtitles:
@@ -390,54 +259,20 @@ def merge_srt_files(srt_contents, time_offsets):
             start_ms = srt_time_to_ms(start_str) + int(offset * 1000)
             end_ms = srt_time_to_ms(end_str) + int(offset * 1000)
             subtitle['timestamp'] = f"{ms_to_srt_time(start_ms)} --> {ms_to_srt_time(end_ms)}"
-            # Store original start time for strict sorting
-            subtitle['start_ms'] = start_ms
-            subtitle['end_ms'] = end_ms
             all_subtitles.append(subtitle)
 
     print(f"Total subtitles before deduplication: {len(all_subtitles)}")
-
-    # Sort strictly by start time first, then by end time
-    all_subtitles.sort(key=lambda x: (x['start_ms'], x['end_ms']))
-
-    # Improved deduplication that preserves chronological order
+    all_subtitles.sort(key=lambda x: srt_time_to_ms(
+        x['timestamp'].split(' --> ')[0]))
     unique_subtitles = []
     seen = set()
-
     for subtitle in all_subtitles:
-        # Create a unique key that includes timing information
         key = (subtitle['timestamp'], subtitle['text'])
-
-        # Only add if we haven't seen this exact subtitle before
         if key not in seen:
             seen.add(key)
             unique_subtitles.append(subtitle)
-
-    # Renumber subtitles sequentially
     for i, subtitle in enumerate(unique_subtitles, 1):
         subtitle['number'] = str(i)
-
-    # Final verification of chronological order - ensure entire list is sorted
-    is_sorted = all(unique_subtitles[i]['start_ms'] <= unique_subtitles[i+1]['start_ms']
-                    for i in range(len(unique_subtitles)-1))
-
-    if not is_sorted:
-        print("⚠️ Warning: Subtitles not in strict chronological order. Resorting...")
-        # Resort by start time and end time
-        unique_subtitles.sort(key=lambda x: (x['start_ms'], x['end_ms']))
-        # Renumber after resorting
-        for i, subtitle in enumerate(unique_subtitles, 1):
-            subtitle['number'] = str(i)
-    else:
-        print("✅ Subtitles are in strict chronological order")
-
-    # Clean up temporary fields
-    for subtitle in unique_subtitles:
-        if 'start_ms' in subtitle:
-            del subtitle['start_ms']
-        if 'end_ms' in subtitle:
-            del subtitle['end_ms']
-
     print(f"Unique subtitles after deduplication: {len(unique_subtitles)}")
     return unique_subtitles
 
@@ -447,82 +282,31 @@ def validate_srt(srt_content):
     print("Validating subtitles...")
     subtitles = parse_srt(srt_content)
     overlap_count = 0
-    order_issues = 0
-
-    if not subtitles:
-        print("⚠️ Warning: No subtitles found to validate")
-        return False
-
-    # Check for chronological ordering
-    prev_start = -1
-    prev_start_str = "00:00:00,000"
-    prev_number = "0"
-
-    for i in range(len(subtitles)):
-        try:
-            current_start = srt_time_to_ms(
-                subtitles[i]['timestamp'].split(' --> ')[0])
-            current_end = srt_time_to_ms(
-                subtitles[i]['timestamp'].split(' --> ')[1])
-            current_start_str = subtitles[i]['timestamp'].split(' --> ')[0]
-
-            # Check chronological order
-            if prev_start > current_start:
-                order_issues += 1
-                print(
-                    f"⚠️ Non-chronological subtitle: #{subtitles[i]['number']} ({current_start_str}) comes after #{prev_number} ({prev_start_str})")
-
-            prev_start = current_start
-            prev_start_str = current_start_str
-            prev_number = subtitles[i]['number']
-
-            # Check for overlaps with next subtitle
-            if i < len(subtitles) - 1:
-                next_start = srt_time_to_ms(
-                    subtitles[i + 1]['timestamp'].split(' --> ')[0])
-                if current_end > next_start:
-                    overlap_count += 1
-                    print(
-                        f"⚠️ Overlapping subtitles: #{subtitles[i]['number']} ends at {subtitles[i]['timestamp'].split(' --> ')[1]}, " +
-                        f"#{subtitles[i+1]['number']} starts at {subtitles[i+1]['timestamp'].split(' --> ')[0]}")
-        except Exception as e:
+    for i in range(len(subtitles) - 1):
+        current_end = srt_time_to_ms(
+            subtitles[i]['timestamp'].split(' --> ')[1])
+        next_start = srt_time_to_ms(
+            subtitles[i + 1]['timestamp'].split(' --> ')[0])
+        if current_end > next_start:
+            overlap_count += 1
             print(
-                f"⚠️ Error validating subtitle #{subtitles[i]['number']}: {e}")
-
-    # Print summary
-    if order_issues == 0 and overlap_count == 0:
-        print("✅ Validation complete: All subtitles are in chronological order with no overlaps")
-    else:
-        print(
-            f"⚠️ Validation complete: {overlap_count} overlapping subtitles found, {order_issues} chronological issues found")
-
-    return order_issues == 0 and overlap_count == 0
+                f"Warning: Overlapping subtitles at {subtitles[i]['number']} and {subtitles[i+1]['number']}")
+    print(f"Validation complete: {overlap_count} overlapping subtitles found")
 
 
-def transcribe_chunk(client, chunk_file, language, chunk_index=0):
-    """Helper function for parallel transcription.
-
-    Args:
-        client: OpenAI client
-        chunk_file: Path to audio chunk file
-        language: Language code or None for auto-detection
-        chunk_index: Index of the chunk in the original sequence
-
-    Returns:
-        Dictionary containing the transcription result and chunk index
-    """
+def transcribe_chunk(client, chunk_file, language):
+    """Helper function for parallel transcription."""
     chunk_name = os.path.basename(chunk_file)
-    print(f"Transcribing {chunk_name} (chunk {chunk_index})...")
+    print(f"Transcribing {chunk_name}...")
     try:
         with open(chunk_file, "rb") as f:
             result = transcribe_audio(client, f, language=language)
-            print(
-                f"Completed transcription of {chunk_name} (chunk {chunk_index})")
-            return {"content": result, "chunk_index": chunk_index}
+            print(f"Completed transcription of {chunk_name}")
+            return result
     except Exception as e:
         print(
-            f"Warning: Failed to transcribe {chunk_name} (chunk {chunk_index}): {e}. Skipping.")
-        return {"content": "", "chunk_index": chunk_index}
+            f"Warning: Failed to transcribe {chunk_name}: {e}. Skipping.")
+        return ""
 
 
 def display_menu():
@@ -537,7 +321,6 @@ def display_menu():
     print("  ✅ Retry logic for API calls")
     print("  ✅ Timestamp adjustment")
     print("  ✅ Subtitle validation")
-    print("  ✅ Automatic language detection")
 
     # Get input file
     while True:
@@ -566,18 +349,34 @@ def display_menu():
             continue
         break
 
+    # Get source language with improved guidance
+    print("\n🔤 Source language (language of the audio):")
+    print("   This is the PRIMARY language spoken in your audio.")
+    print("   ⚠️  IMPORTANT: For mixed language content, specify the dominant language.")
+    print("   This ensures consistent transcription without language switching.")
+    print("   Common codes: en (English), es (Spanish), fr (French), etc.")
+    source_language = input(
+        "   Enter source language code [default: en]: ").strip().lower() or "en"
+    if source_language in COMMON_LANGUAGES:
+        print(f"   Selected: {COMMON_LANGUAGES[source_language]}")
+
     # Get target language with improved guidance
     print("\n🌐 Target language (language for the subtitles):")
     print("   This is the language your subtitles will be translated to.")
-    print("   The source language will be automatically detected.")
+    print("   If same as source language, no translation will be performed.")
     print("   Common codes: en (English), es (Spanish), fr (French), etc.")
     target_language = input(
         "   Enter target language code [default: en]: ").strip().lower() or "en"
     if target_language in COMMON_LANGUAGES:
         print(f"   Selected: {COMMON_LANGUAGES[target_language]}")
 
-    print(
-        f"\n📝 NOTE: Audio language will be automatically detected and translated to {COMMON_LANGUAGES.get(target_language, target_language)}.")
+    # Add warning if source and target are different
+    if source_language != target_language:
+        print(
+            f"\n📝 NOTE: Audio will be transcribed from {COMMON_LANGUAGES.get(source_language, source_language)} and translated to {COMMON_LANGUAGES.get(target_language, target_language)}.")
+    else:
+        print(
+            f"\n📝 NOTE: Audio will be transcribed in {COMMON_LANGUAGES.get(source_language, source_language)} with no translation.")
 
     # Get output directory
     output_dir = input("\n📂 Enter output directory [default: output_srt_files]: ").strip(
@@ -593,7 +392,7 @@ def display_menu():
     print("📋 Summary of settings:")
     print(f"   Input file: {input_file}")
     print(f"   Output name: {output_name}")
-    print(f"   Source language: Auto-detect")
+    print(f"   Source language: {source_language}")
     print(f"   Target language: {target_language}")
     print(f"   Output directory: {output_dir}")
     print("-"*60)
@@ -606,7 +405,7 @@ def display_menu():
     return {
         'input': input_file,
         'output_name': output_name,
-        'language': None,  # Set to None for auto-detection
+        'language': source_language,
         'target_language': target_language,
         'output_dir': output_dir
     }
@@ -647,8 +446,12 @@ def process_with_args(args):
             temp_files.append(audio_file_path)
 
         audio_size = os.path.getsize(audio_file_path) / (1024 * 1024)
-        # Always translate to target language
-        print(f"Will translate to {args.target_language} after transcription.")
+        need_translation = not (
+            args.language and args.language.lower() == args.target_language.lower())
+        if need_translation:
+            print(f"Translating to {args.target_language}.")
+        else:
+            print("Source and target languages match. Skipping translation.")
 
         if audio_size > 25:
             print(f"Audio size: {audio_size:.2f} MB. Chunking required.")
@@ -666,68 +469,29 @@ def process_with_args(args):
                 # Set up progress tracking for transcription
                 total_chunks = len(chunk_files)
                 completed_chunks = 0
-
-                # Create a results array to maintain chunk order
-                ordered_results = [None] * len(chunk_files)
-
-                # Add timeout tracking
-                transcription_start = time.time()
-                last_progress_time = time.time()
-                stall_timeout = 120  # 2 minutes without progress is considered stalled
+                srt_contents = []
 
                 with ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = {executor.submit(transcribe_chunk, client, cf, args.language, i): i
+                    futures = {executor.submit(transcribe_chunk, client, cf, args.language): i
                                for i, cf in enumerate(chunk_files)}
 
                     for future in as_completed(futures):
-                        try:
-                            result = future.result()
-                            chunk_index = result["chunk_index"]
-                            ordered_results[chunk_index] = result["content"]
-
-                            completed_chunks += 1
-                            last_progress_time = time.time()
-                            percent = (completed_chunks / total_chunks) * 100
-                            print(
-                                f"  Transcription progress: {completed_chunks}/{total_chunks} ({percent:.1f}%)")
-
-                            # Check for stalled progress
-                            if time.time() - last_progress_time > stall_timeout:
-                                print(
-                                    "⚠️ Transcription appears stalled. Continuing with available results...")
-                                break
-                        except Exception as e:
-                            print(
-                                f"Error processing chunk: {str(e)[:100]}. Continuing with available results.")
-
-                # Handle any missing chunks
-                if completed_chunks < total_chunks:
-                    print(
-                        f"⚠️ Only completed {completed_chunks}/{total_chunks} chunks. Proceeding with available data.")
-
-                # Filter out None values and use results in the correct order
-                srt_contents = [r for r in ordered_results if r is not None]
+                        srt_contents.append(future.result())
+                        completed_chunks += 1
+                        percent = (completed_chunks / total_chunks) * 100
+                        print(
+                            f"  Transcription progress: {completed_chunks}/{total_chunks} ({percent:.1f}%)")
 
                 print(
                     f"Transcription completed in {time.time() - transcription_start:.1f} seconds")
 
-                # Merge all subtitles with proper timestamps
                 subtitles = merge_srt_files(srt_contents, time_offsets)
-
-                # Always translate
-                subtitles = translate_subtitles(
-                    client, subtitles, args.target_language)
-
-                # Adjust timestamps
+                if need_translation:
+                    subtitles = translate_subtitles(
+                        client, subtitles, args.target_language)
                 subtitles = adjust_timestamps(subtitles)
-
-                # Final conversion to SRT with strict chronological ordering
                 final_srt = subtitles_to_srt(subtitles)
-
-                # Validate the final SRT
                 validate_srt(final_srt)
-
-                # Write to file
                 with open(srt_path, "w") as srt_file:
                     srt_file.write(final_srt)
                 print(f"SRT saved to '{srt_path}'.")
@@ -741,9 +505,9 @@ def process_with_args(args):
                     f"Transcription completed in {time.time() - transcription_start:.1f} seconds")
                 subtitles = parse_srt(response)
                 print(f"Parsed {len(subtitles)} subtitles")
-                # Always translate
-                subtitles = translate_subtitles(
-                    client, subtitles, args.target_language)
+                if need_translation:
+                    subtitles = translate_subtitles(
+                        client, subtitles, args.target_language)
                 subtitles = adjust_timestamps(subtitles)
                 final_srt = subtitles_to_srt(subtitles)
                 validate_srt(final_srt)
@@ -772,11 +536,14 @@ def main():
     if len(sys.argv) > 1:
         # Use argparse for backward compatibility
         parser = argparse.ArgumentParser(
-            description="Generate consistent SRT files with automatic language detection and translation.")
+            description="Generate consistent SRT files with non-English translations.")
         parser.add_argument(
             "input", help="Input file path (e.g., video.mp4, audio.mp3)")
         parser.add_argument(
             "output_name", help="Output SRT file name (without extension)")
+        parser.add_argument(
+            "--language", default="en",
+            help="Source language of the audio (e.g., 'en', 'es'). For mixed language content, specify the dominant language.")
         parser.add_argument("--target-language", default="en",
                             help="Target language for the subtitles (e.g., 'fr', 'es')")
         parser.add_argument(
@@ -796,16 +563,21 @@ def main():
             # Remove surrounding quotes
             args.output_dir = args.output_dir[1:-1]
 
-        # Set language to None for auto-detection
-        args.language = None
-
         # Display language information
-        if args.target_language in COMMON_LANGUAGES:
-            print(
-                f"\n📝 NOTE: Audio language will be automatically detected and translated to {COMMON_LANGUAGES[args.target_language]}.")
+        if args.language != args.target_language:
+            if args.language in COMMON_LANGUAGES and args.target_language in COMMON_LANGUAGES:
+                print(
+                    f"\n📝 NOTE: Audio will be transcribed from {COMMON_LANGUAGES[args.language]} and translated to {COMMON_LANGUAGES[args.target_language]}.")
+            else:
+                print(
+                    f"\n📝 NOTE: Audio will be transcribed from '{args.language}' and translated to '{args.target_language}'.")
         else:
-            print(
-                f"\n📝 NOTE: Audio language will be automatically detected and translated to '{args.target_language}'.")
+            if args.language in COMMON_LANGUAGES:
+                print(
+                    f"\n📝 NOTE: Audio will be transcribed in {COMMON_LANGUAGES[args.language]} with no translation.")
+            else:
+                print(
+                    f"\n📝 NOTE: Audio will be transcribed in '{args.language}' with no translation.")
 
         if args.interactive:
             menu_args = display_menu()

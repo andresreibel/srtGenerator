@@ -1,12 +1,12 @@
 # Video to SRT Generator
 
-A command-line tool that generates SRT subtitle files from video files using OpenAI's Whisper API. It can transcribe audio in its original language or translate it to a target language.
+A command-line tool that generates SRT subtitle files from video files using OpenAI's Whisper API. It automatically detects the source language and can translate to any target language.
 
 ## Features
 
 - Interactive CLI menu for easier usage
-- Transcribe audio in its original language
-- Translate audio to any language supported by OpenAI's Whisper API
+- Automatic language detection for source audio
+- Translation to any language supported by OpenAI's Whisper API
 - Support for absolute file paths and paths with special characters (including quoted paths)
 - Intelligent timestamp adjustment based on translated text length
 - Audio compression and chunking for large files
@@ -57,7 +57,6 @@ This will guide you through the process with prompts for:
 
 - Input file path
 - Output name
-- Source language
 - Target language
 - Output directory
 
@@ -66,27 +65,21 @@ This will guide you through the process with prompts for:
 #### Basic Usage
 
 ```
-python video_to_srt.py input_file output_name --language source_lang --target-language target_lang
+python video_to_srt.py input_file output_name --target-language target_lang
 ```
 
 #### Examples
 
-Transcribe English audio to English subtitles:
+Transcribe audio to English subtitles:
 
 ```
-python video_to_srt.py video.mp4 output_name --language en --target-language en
+python video_to_srt.py video.mp4 output_name --target-language en
 ```
 
-Transcribe English audio to Spanish subtitles:
+Transcribe audio to Spanish subtitles:
 
 ```
-python video_to_srt.py video.mp4 output_name --language en --target-language es
-```
-
-Transcribe Japanese audio to English subtitles:
-
-```
-python video_to_srt.py video.mp4 output_name --language ja --target-language en
+python video_to_srt.py video.mp4 output_name --target-language es
 ```
 
 #### Using Paths with Special Characters
@@ -94,29 +87,29 @@ python video_to_srt.py video.mp4 output_name --language ja --target-language en
 You can use quotes for paths with special characters:
 
 ```
-python video_to_srt.py '/path/to/your/video with #special characters.mp4' output_name --language en --target-language es
+python video_to_srt.py '/path/to/your/video with #special characters.mp4' output_name --target-language es
 ```
 
 #### Custom Output Directory
 
 ```
-python video_to_srt.py video.mp4 output_name --language en --target-language es --output-dir /path/to/custom/directory
+python video_to_srt.py video.mp4 output_name --target-language es --output-dir /path/to/custom/directory
 ```
 
 ## Handling Mixed Language Content
 
-When working with audio that contains multiple languages:
+The tool now automatically detects the language of the audio content. For mixed language content:
 
-1. **Identify the primary language** in your audio content
-2. Specify this as the `--language` parameter (or select it in the interactive menu)
-3. Choose your desired `--target-language` for the output subtitles
+1. The tool will automatically detect the dominant language
+2. Choose your desired `--target-language` for the output subtitles
+3. All content will be translated to the target language
 
-This approach ensures that Whisper will treat all speech as if it were in the specified source language, resulting in consistent transcription without language switching in the output.
+This approach ensures consistent translation without language switching in the output.
 
-Example for mixed English/Spanish audio where English is dominant:
+Example for mixed language audio:
 
 ```
-python video_to_srt.py mixed_audio.mp4 output_name --language en --target-language es
+python video_to_srt.py mixed_audio.mp4 output_name --target-language es
 ```
 
 ## How It Works
@@ -124,8 +117,8 @@ python video_to_srt.py mixed_audio.mp4 output_name --language en --target-langua
 ### Translation Process
 
 1. **Audio Extraction**: Converts video to audio using ffmpeg
-2. **Transcription**: Uses OpenAI's Whisper API to transcribe audio in the source language
-3. **Translation** (if needed): Translates text to the target language using GPT-3.5 Turbo
+2. **Transcription with Auto-detection**: Uses OpenAI's Whisper API to automatically detect and transcribe audio
+3. **Translation**: Translates text to the target language using GPT-3.5 Turbo
 4. **Timestamp Adjustment**: Adjusts subtitle durations based on text length
 5. **Validation**: Checks for overlapping subtitles and other issues
 
@@ -154,9 +147,8 @@ The script supports all languages supported by OpenAI's Whisper model. Common la
 
 ## Important Notes
 
-- **Always specify the source language** for best results
-- **For mixed language content, specify the primary/dominant language** to avoid inconsistent transcription
-- The default source and target language is English if not specified
+- **Language detection is automatic** - no need to specify the source language
+- The tool will always translate to the specified target language
 - The maximum audio file size supported by OpenAI's API is 25 MB (handled automatically)
 - The quality of transcription depends on the audio quality and the Whisper model's capabilities
 
@@ -164,3 +156,26 @@ The script supports all languages supported by OpenAI's Whisper model. Common la
 
 - **Whisper API**: $0.006 per minute (or $0.36 per hour)
 - **GPT-3.5 Turbo** (for translation): ~$0.01-0.02 for an hour of speech
+
+## YouTube Integration
+
+### Recommendation for YouTube Uploads
+
+If your primary concern is making your content accessible to a global audience with minimal effort:
+
+1. Use `video_new.py` to generate a clean, consistent English SRT file (especially if your audio has mixed languages)
+2. Upload this English SRT to YouTube
+3. Let viewers use YouTube's auto-translate feature as needed
+
+This approach balances your workload with accessibility, while still addressing concerns about mixed language content in the original SRT file.
+
+### How YouTube Translation Works for Viewers
+
+When you upload an English SRT file to YouTube:
+
+- Viewers can click on the settings (gear icon) in the player
+- Select "Subtitles/CC"
+- Choose "Auto-translate"
+- Select their preferred language from the list
+
+This provides accessibility in all languages YouTube supports without requiring you to create multiple SRT files.
