@@ -861,6 +861,262 @@ def fix_overlapping_subtitles(subtitles, gap_ms=20, min_duration_ms=500, chars_p
     return subtitles
 
 
+def fix_short_subtitles(subtitles, min_duration_ms=500, gap_ms=20):
+    """
+    Fix subtitles that are too short by extending their duration.
+    Uses the same context-aware approach as fix_overlapping_subtitles.
+
+    Args:
+        subtitles: List of subtitle dictionaries
+        min_duration_ms: Minimum duration for any subtitle in milliseconds
+        gap_ms: Desired gap between subtitles in milliseconds
+
+    Returns:
+        List of subtitles with short durations fixed
+    """
+    # Calculate duration statistics
+    durations = []
+    for subtitle in subtitles:
+        start_str, end_str = subtitle['timestamp'].split(' --> ')
+        start_ms = srt_time_to_ms(start_str)
+        end_ms = srt_time_to_ms(end_str)
+        durations.append(end_ms - start_ms)
+
+    # Calculate mean and standard deviation
+    mean_duration = statistics.mean(durations) if durations else 0
+    std_dev = statistics.stdev(durations) if len(durations) > 1 else 0
+
+    # Set minimum duration threshold as mean - std_dev, but at least min_duration_ms
+    min_threshold = max(min_duration_ms, int(mean_duration - std_dev))
+
+    print(f"\n📊 FIXING SHORT SUBTITLES 📊")
+    print("═" * 60)
+    print(f"Mean duration: {mean_duration/1000:.2f}s")
+    print(f"Standard deviation: {std_dev/1000:.2f}s")
+    print(f"Minimum duration threshold: {min_threshold/1000:.2f}s")
+
+    # Ensure subtitles are sorted by start time
+    subtitles = sorted(subtitles, key=lambda x: srt_time_to_ms(
+        x['timestamp'].split(' --> ')[0]))
+
+    adjusted_count = 0
+    removed_count = 0
+
+    # Process each subtitle except the last one
+    i = 0
+    while i < len(subtitles) - 1:
+        # Get previous, current, and next subtitles
+        prev_sub = subtitles[i-1] if i > 0 else None
+        current = subtitles[i]
+        next_sub = subtitles[i + 1]
+
+        # Extract timestamps
+        current_start_str, current_end_str = current['timestamp'].split(
+            ' --> ')
+        next_start_str, next_end_str = next_sub['timestamp'].split(' --> ')
+
+        # Get previous subtitle timestamps if available
+        prev_end_ms = None
+        if prev_sub:
+            prev_end_str = prev_sub['timestamp'].split(' --> ')[1]
+            prev_end_ms = srt_time_to_ms(prev_end_str)
+            prev_is_empty = prev_sub['text'].strip() == ""
+
+        # Convert to milliseconds
+        current_start_ms = srt_time_to_ms(current_start_str)
+        current_end_ms = srt_time_to_ms(current_end_str)
+        next_start_ms = srt_time_to_ms(next_start_str)
+        next_end_ms = srt_time_to_ms(next_end_str)
+
+        # Calculate current duration
+        current_duration = current_end_ms - current_start_ms
+
+        # Check if next subtitle is empty
+        next_is_empty = next_sub['text'].strip() == ""
+
+        # Check if current subtitle is empty
+        current_is_empty = current['text'].strip() == ""
+
+        # If current subtitle is empty, consider removing it
+        if current_is_empty:
+            # Remove empty subtitle
+            print(f"Removing empty subtitle #{current['number']}")
+            print(f"   TIMESTAMP: {current['timestamp']}")
+            print("─" * 60)
+
+            subtitles.pop(i)
+            removed_count += 1
+
+            # Don't increment i since we removed a subtitle
+            continue
+
+        # Check if duration is too short
+        if current_duration < min_threshold:
+            # Log the short duration
+            print(
+                f"Short subtitle #{current['number']} ({current_duration}ms)")
+            print(f"   BEFORE: {current['timestamp']}")
+
+            # Store original timestamp for logging
+            original_timestamp = current['timestamp']
+
+            # Calculate how much additional time is needed
+            additional_needed = min_threshold - current_duration
+
+            # Check if we can use space from previous subtitle
+            prev_space_available = 0
+            if prev_sub:
+                # Calculate gap between previous and current
+                prev_gap = current_start_ms - prev_end_ms
+
+                # If previous is empty, we can remove it and use its space
+                if prev_is_empty:
+                    # Find the subtitle before previous
+                    before_prev_idx = i - 2
+                    if before_prev_idx >= 0:
+                        before_prev = subtitles[before_prev_idx]
+                        before_prev_end_str = before_prev['timestamp'].split(
+                            ' --> ')[1]
+                        before_prev_end_ms = srt_time_to_ms(
+                            before_prev_end_str)
+
+                        # Calculate total available space
+                        prev_space_available = current_start_ms - before_prev_end_ms - gap_ms
+
+                        # Log the potential space
+                        print(
+                            f"   NOTE: Can use {prev_space_available}ms from empty previous subtitle #{prev_sub['number']}")
+
+                        # Remove the empty previous subtitle
+                        subtitles.pop(i-1)
+                        removed_count += 1
+                        i -= 1  # Adjust current index
+
+                        # Update current after removal
+                        current = subtitles[i]
+                        current_start_str, current_end_str = current['timestamp'].split(
+                            ' --> ')
+                        current_start_ms = srt_time_to_ms(current_start_str)
+                else:
+                    # Just use the gap if previous is not empty
+                    prev_space_available = prev_gap - gap_ms if prev_gap > gap_ms else 0
+                    if prev_space_available > 0:
+                        print(
+                            f"   NOTE: Can use {prev_space_available}ms gap from previous subtitle #{prev_sub['number']}")
+
+            # Check if next subtitle is empty and can be used
+            next_space_available = 0
+            if next_is_empty:
+                # Find the subtitle after next
+                after_next_idx = i + 2
+                if after_next_idx < len(subtitles):
+                    after_next = subtitles[after_next_idx]
+                    after_next_start_str = after_next['timestamp'].split(
+                        ' --> ')[0]
+                    after_next_start_ms = srt_time_to_ms(after_next_start_str)
+
+                    # Calculate available space
+                    next_space_available = after_next_start_ms - current_end_ms - gap_ms
+
+                    # Log the potential space
+                    print(
+                        f"   NOTE: Can use {next_space_available}ms from empty next subtitle #{next_sub['number']}")
+
+                    # Remove the empty next subtitle
+                    subtitles.pop(i + 1)
+                    removed_count += 1
+
+                    # Update next subtitle reference
+                    if i + 1 < len(subtitles):
+                        next_sub = subtitles[i + 1]
+                        next_start_str = next_sub['timestamp'].split(
+                            ' --> ')[0]
+                        next_start_ms = srt_time_to_ms(next_start_str)
+                    else:
+                        next_sub = None
+                        next_start_ms = current_end_ms + gap_ms + additional_needed
+            else:
+                # Calculate available space until next subtitle
+                next_space_available = next_start_ms - current_end_ms - gap_ms
+
+            # Determine how to extend the subtitle
+            new_start_ms = current_start_ms
+            new_end_ms = current_end_ms
+
+            # If we have space from previous, adjust start time earlier
+            if prev_space_available > 0:
+                shift_start = min(prev_space_available, additional_needed // 2)
+                new_start_ms = current_start_ms - shift_start
+                print(
+                    f"   NOTE: Shifted start time earlier by {shift_start}ms")
+
+            # If we have space until next subtitle, extend end time
+            if next_space_available > 0:
+                # Calculate remaining needed time after start adjustment
+                remaining_needed = min_threshold - (new_end_ms - new_start_ms)
+                extend_end = min(next_space_available, remaining_needed)
+                new_end_ms = current_end_ms + extend_end
+                print(f"   NOTE: Extended end time by {extend_end}ms")
+
+            # If we still don't have enough duration, force minimum duration
+            if new_end_ms - new_start_ms < min_threshold:
+                # If we can't shift start earlier, extend end
+                if prev_space_available <= 0 and next_space_available > 0:
+                    new_end_ms = new_start_ms + min_threshold
+                    print(f"   NOTE: Forced minimum duration by extending end time")
+                # If we can't extend end, shift start earlier
+                elif prev_space_available > 0 and next_space_available <= 0:
+                    new_start_ms = new_end_ms - min_threshold
+                    print(f"   NOTE: Forced minimum duration by shifting start time")
+                # If we can do both, distribute evenly
+                elif prev_space_available > 0 and next_space_available > 0:
+                    remaining_needed = min_threshold - \
+                        (new_end_ms - new_start_ms)
+                    shift_start = remaining_needed // 2
+                    extend_end = remaining_needed - shift_start
+                    new_start_ms = new_start_ms - shift_start
+                    new_end_ms = new_end_ms + extend_end
+                    print(
+                        f"   NOTE: Distributed remaining {remaining_needed}ms evenly")
+                # If we can't do either, just extend end and accept potential overlap
+                else:
+                    new_end_ms = new_start_ms + min_threshold
+                    print(f"   WARNING: Forced minimum duration, may cause overlap")
+
+            # Update the timestamp
+            current['timestamp'] = f"{ms_to_srt_time(new_start_ms)} --> {ms_to_srt_time(new_end_ms)}"
+            adjusted_count += 1
+
+            # Log the change
+            print(f"   AFTER: {current['timestamp']}")
+            print(f"   TEXT: \"{current['text']}\"")
+            print("─" * 60)
+
+            # Also print to console
+            print(
+                f"Fixed short subtitle: #{current['number']} {original_timestamp} → {current['timestamp']}")
+
+        # Move to next subtitle
+        i += 1
+
+    # Renumber subtitles sequentially after removals
+    if removed_count > 0:
+        for i, subtitle in enumerate(subtitles, 1):
+            subtitle['number'] = str(i)
+
+    if adjusted_count > 0:
+        print(f"✅ Fixed {adjusted_count} short subtitles")
+    else:
+        print("✅ No short subtitles found")
+
+    if removed_count > 0:
+        print(f"✅ Removed {removed_count} empty subtitles")
+
+    print("═" * 60)
+
+    return subtitles
+
+
 def remove_inaudible_markers(subtitles):
     """Remove [inaudible] markers from subtitles while preserving timestamps."""
     inaudible_count = 0
@@ -1636,6 +1892,9 @@ def process_with_args(args):
                 # Fix any overlapping subtitles
                 fixed_subtitles = fix_overlapping_subtitles(final_subtitles)
 
+                # Fix short subtitles
+                fixed_subtitles = fix_short_subtitles(fixed_subtitles)
+
                 # Remove [inaudible] markers
                 fixed_subtitles = remove_inaudible_markers(fixed_subtitles)
 
@@ -1681,6 +1940,9 @@ def process_with_args(args):
 
                 # Fix any overlapping subtitles
                 fixed_subtitles = fix_overlapping_subtitles(final_subtitles)
+
+                # Fix short subtitles
+                fixed_subtitles = fix_short_subtitles(fixed_subtitles)
 
                 # Remove [inaudible] markers
                 fixed_subtitles = remove_inaudible_markers(fixed_subtitles)
