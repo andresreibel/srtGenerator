@@ -895,6 +895,13 @@ def split_subtitle(subtitle_num: int, start_time: str, end_time: str, text: str,
     end_ms = srt_time_to_ms(end_time)
     total_duration = end_ms - start_ms
 
+    # Define minimum duration for any segment (200ms)
+    min_segment_duration = 200
+
+    # If total duration is too short for splitting, return original
+    if total_duration < min_segment_duration * 2:
+        return [(start_time, end_time, text)]
+
     # Try to split at sentence boundaries first
     sentences = re.split(r'([.!?])\s+', text)
     if len(sentences) > 1:
@@ -936,15 +943,25 @@ def split_subtitle(subtitle_num: int, start_time: str, end_time: str, text: str,
 
             current_start_ms = start_ms
             for i, segment in enumerate(segments):
+                # Calculate proportional duration based on character count
                 segment_duration = int(
                     total_duration * (len(segment) / total_chars))
 
-                # Ensure the last segment ends exactly at the original end time
+                # Ensure minimum duration
+                segment_duration = max(segment_duration, min_segment_duration)
+
+                # Calculate end time
+                segment_end_ms = current_start_ms + segment_duration
+
+                # For the last segment, use the original end time
                 if i == len(segments) - 1:
                     segment_end_ms = end_ms
-                else:
-                    segment_end_ms = current_start_ms + segment_duration
 
+                # Validate: ensure end time is after start time
+                if segment_end_ms <= current_start_ms:
+                    segment_end_ms = current_start_ms + min_segment_duration
+
+                # Add the segment with validated timing
                 result.append((
                     ms_to_srt_time(current_start_ms),
                     ms_to_srt_time(segment_end_ms),
@@ -952,7 +969,32 @@ def split_subtitle(subtitle_num: int, start_time: str, end_time: str, text: str,
                 ))
 
                 # Add a small gap between segments (100ms)
-                current_start_ms = segment_end_ms + 100
+                # Ensure this doesn't push beyond the total duration
+                if i < len(segments) - 1:
+                    next_start_ms = segment_end_ms + 100
+
+                    # If adding the gap would exceed the end time, adjust
+                    if next_start_ms >= end_ms:
+                        # Use 80% of remaining time for this segment
+                        remaining = end_ms - current_start_ms
+                        segment_end_ms = current_start_ms + \
+                            int(remaining * 0.8)
+
+                        # Validate again
+                        if segment_end_ms <= current_start_ms:
+                            segment_end_ms = current_start_ms + min_segment_duration
+
+                        # Update the segment's end time
+                        result[-1] = (
+                            ms_to_srt_time(current_start_ms),
+                            ms_to_srt_time(segment_end_ms),
+                            segment
+                        )
+
+                        # Set next start time to remaining 20%
+                        next_start_ms = segment_end_ms + 10  # minimal gap
+
+                    current_start_ms = next_start_ms
 
             return result
 
@@ -985,15 +1027,25 @@ def split_subtitle(subtitle_num: int, start_time: str, end_time: str, text: str,
 
             current_start_ms = start_ms
             for i, segment in enumerate(segments):
+                # Calculate proportional duration based on character count
                 segment_duration = int(
                     total_duration * (len(segment) / total_chars))
 
-                # Ensure the last segment ends exactly at the original end time
+                # Ensure minimum duration
+                segment_duration = max(segment_duration, min_segment_duration)
+
+                # Calculate end time
+                segment_end_ms = current_start_ms + segment_duration
+
+                # For the last segment, use the original end time
                 if i == len(segments) - 1:
                     segment_end_ms = end_ms
-                else:
-                    segment_end_ms = current_start_ms + segment_duration
 
+                # Validate: ensure end time is after start time
+                if segment_end_ms <= current_start_ms:
+                    segment_end_ms = current_start_ms + min_segment_duration
+
+                # Add the segment with validated timing
                 result.append((
                     ms_to_srt_time(current_start_ms),
                     ms_to_srt_time(segment_end_ms),
@@ -1001,7 +1053,32 @@ def split_subtitle(subtitle_num: int, start_time: str, end_time: str, text: str,
                 ))
 
                 # Add a small gap between segments (100ms)
-                current_start_ms = segment_end_ms + 100
+                # Ensure this doesn't push beyond the total duration
+                if i < len(segments) - 1:
+                    next_start_ms = segment_end_ms + 100
+
+                    # If adding the gap would exceed the end time, adjust
+                    if next_start_ms >= end_ms:
+                        # Use 80% of remaining time for this segment
+                        remaining = end_ms - current_start_ms
+                        segment_end_ms = current_start_ms + \
+                            int(remaining * 0.8)
+
+                        # Validate again
+                        if segment_end_ms <= current_start_ms:
+                            segment_end_ms = current_start_ms + min_segment_duration
+
+                        # Update the segment's end time
+                        result[-1] = (
+                            ms_to_srt_time(current_start_ms),
+                            ms_to_srt_time(segment_end_ms),
+                            segment
+                        )
+
+                        # Set next start time to remaining 20%
+                        next_start_ms = segment_end_ms + 10  # minimal gap
+
+                    current_start_ms = next_start_ms
 
             return result
 
@@ -1029,14 +1106,24 @@ def split_subtitle(subtitle_num: int, start_time: str, end_time: str, text: str,
 
     current_start_ms = start_ms
     for i, segment in enumerate(segments):
+        # Calculate proportional duration based on character count
         segment_duration = int(total_duration * (len(segment) / total_chars))
 
-        # Ensure the last segment ends exactly at the original end time
+        # Ensure minimum duration
+        segment_duration = max(segment_duration, min_segment_duration)
+
+        # Calculate end time
+        segment_end_ms = current_start_ms + segment_duration
+
+        # For the last segment, use the original end time
         if i == len(segments) - 1:
             segment_end_ms = end_ms
-        else:
-            segment_end_ms = current_start_ms + segment_duration
 
+        # Validate: ensure end time is after start time
+        if segment_end_ms <= current_start_ms:
+            segment_end_ms = current_start_ms + min_segment_duration
+
+        # Add the segment with validated timing
         result.append((
             ms_to_srt_time(current_start_ms),
             ms_to_srt_time(segment_end_ms),
@@ -1044,7 +1131,31 @@ def split_subtitle(subtitle_num: int, start_time: str, end_time: str, text: str,
         ))
 
         # Add a small gap between segments (100ms)
-        current_start_ms = segment_end_ms + 100
+        # Ensure this doesn't push beyond the total duration
+        if i < len(segments) - 1:
+            next_start_ms = segment_end_ms + 100
+
+            # If adding the gap would exceed the end time, adjust
+            if next_start_ms >= end_ms:
+                # Use 80% of remaining time for this segment
+                remaining = end_ms - current_start_ms
+                segment_end_ms = current_start_ms + int(remaining * 0.8)
+
+                # Validate again
+                if segment_end_ms <= current_start_ms:
+                    segment_end_ms = current_start_ms + min_segment_duration
+
+                # Update the segment's end time
+                result[-1] = (
+                    ms_to_srt_time(current_start_ms),
+                    ms_to_srt_time(segment_end_ms),
+                    segment
+                )
+
+                # Set next start time to remaining 20%
+                next_start_ms = segment_end_ms + 10  # minimal gap
+
+            current_start_ms = next_start_ms
 
     return result
 
@@ -1096,15 +1207,15 @@ def split_long_subtitles(subtitles, max_length=0):
             # Split long subtitle
             splits = split_subtitle(
                 int(subtitle['number']), start_time, end_time, text, max_length)
-               for split_start, split_end, split_text in splits:
-                    new_subtitle = subtitle.copy()
-                    new_subtitle['timestamp'] = f"{split_start} --> {split_end}"
-                    new_subtitle['text'] = split_text
-                    new_subtitles.append(new_subtitle)
-                split_count += 1
-            else:
-                # Keep short subtitle as is
-                new_subtitles.append(subtitle)
+            for split_start, split_end, split_text in splits:
+                new_subtitle = subtitle.copy()
+                new_subtitle['timestamp'] = f"{split_start} --> {split_end}"
+                new_subtitle['text'] = split_text
+                new_subtitles.append(new_subtitle)
+            split_count += 1
+        else:
+            # Keep short subtitle as is
+            new_subtitles.append(subtitle)
 
     print(
         f"✅ Split {split_count} long subtitles into {len(new_subtitles) - len(subtitles) + split_count} parts")
