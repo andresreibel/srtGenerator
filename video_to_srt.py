@@ -5,6 +5,7 @@ import tempfile
 import re
 import time
 import sys
+import statistics
 from openai import OpenAI
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -880,6 +881,419 @@ def remove_inaudible_markers(subtitles):
     return subtitles
 
 
+def split_subtitle(subtitle_num: int, start_time: str, end_time: str, text: str,
+                   max_length: int = 78):
+    """
+    Split a long subtitle into multiple parts based on natural language breaks.
+    Returns a list of (start_time, end_time, text) tuples.
+    """
+    if len(text) <= max_length:
+        return [(start_time, end_time, text)]
+
+    # Calculate total duration in milliseconds
+    start_ms = srt_time_to_ms(start_time)
+    end_ms = srt_time_to_ms(end_time)
+    total_duration = end_ms - start_ms
+
+    # Try to split at sentence boundaries first
+    sentences = re.split(r'([.!?])\s+', text)
+    if len(sentences) > 1:
+        # Recombine the sentences with their punctuation
+        reconstructed = []
+        i = 0
+        while i < len(sentences):
+            if i + 1 < len(sentences) and sentences[i+1] in ['.', '!', '?']:
+                reconstructed.append(sentences[i] + sentences[i+1])
+                i += 2
+            else:
+                reconstructed.append(sentences[i])
+                i += 1
+
+        # Now try to group sentences into segments
+        segments = []
+        current_segment = ""
+
+        for sentence in reconstructed:
+            if not sentence.strip():
+                continue
+
+            if len(current_segment) + len(sentence) + 1 <= max_length or not current_segment:
+                if current_segment:
+                    current_segment += " " + sentence
+                else:
+                    current_segment = sentence
+            else:
+                segments.append(current_segment.strip())
+                current_segment = sentence
+
+        if current_segment:
+            segments.append(current_segment.strip())
+
+        if segments and all(len(segment) <= max_length for segment in segments):
+            # Calculate time distribution based on character count
+            total_chars = sum(len(s) for s in segments)
+            result = []
+
+            current_start_ms = start_ms
+            for i, segment in enumerate(segments):
+                segment_duration = int(
+                    total_duration * (len(segment) / total_chars))
+
+                # Ensure the last segment ends exactly at the original end time
+                if i == len(segments) - 1:
+                    segment_end_ms = end_ms
+                else:
+                    segment_end_ms = current_start_ms + segment_duration
+
+                result.append((
+                    ms_to_srt_time(current_start_ms),
+                    ms_to_srt_time(segment_end_ms),
+                    segment
+                ))
+
+                # Add a small gap between segments (100ms)
+                current_start_ms = segment_end_ms + 100
+
+            return result
+
+    # If sentence splitting didn't work well, try clause splitting
+    clauses = re.split(r',\s+', text)
+    if len(clauses) > 1:
+        segments = []
+        current_segment = ""
+
+        for clause in clauses:
+            if not clause.strip():
+                continue
+
+            if len(current_segment) + len(clause) + 2 <= max_length or not current_segment:
+                if current_segment:
+                    current_segment += ", " + clause
+                else:
+                    current_segment = clause
+            else:
+                segments.append(current_segment.strip())
+                current_segment = clause
+
+        if current_segment:
+            segments.append(current_segment.strip())
+
+        if segments and all(len(segment) <= max_length for segment in segments):
+            # Calculate time distribution based on character count
+            total_chars = sum(len(s) for s in segments)
+            result = []
+
+            current_start_ms = start_ms
+            for i, segment in enumerate(segments):
+                segment_duration = int(
+                    total_duration * (len(segment) / total_chars))
+
+                # Ensure the last segment ends exactly at the original end time
+                if i == len(segments) - 1:
+                    segment_end_ms = end_ms
+                else:
+                    segment_end_ms = current_start_ms + segment_duration
+
+                result.append((
+                    ms_to_srt_time(current_start_ms),
+                    ms_to_srt_time(segment_end_ms),
+                    segment
+                ))
+
+                # Add a small gap between segments (100ms)
+                current_start_ms = segment_end_ms + 100
+
+            return result
+
+    # If all else fails, split by words
+    words = text.split()
+    segments = []
+    current_segment = ""
+
+    for word in words:
+        if len(current_segment) + len(word) + 1 <= max_length or not current_segment:
+            if current_segment:
+                current_segment += " " + word
+            else:
+                current_segment = word
+        else:
+            segments.append(current_segment.strip())
+            current_segment = word
+
+    if current_segment:
+        segments.append(current_segment.strip())
+
+    # Calculate time distribution based on character count
+    total_chars = sum(len(s) for s in segments)
+    result = []
+
+    current_start_ms = start_ms
+    for i, segment in enumerate(segments):
+        segment_duration = int(total_duration * (len(segment) / total_chars))
+
+        # Ensure the last segment ends exactly at the original end time
+        if i == len(segments) - 1:
+            segment_end_ms = end_ms
+        else:
+            segment_end_ms = current_start_ms + segment_duration
+
+        result.append((
+            ms_to_srt_time(current_start_ms),
+            ms_to_srt_time(segment_end_ms),
+            segment
+        ))
+
+        # Add a small gap between segments (100ms)
+        current_start_ms = segment_end_ms + 100
+
+    return result
+
+
+def split_long_subtitles(subtitles, max_length=0):
+    """
+    Split long subtitles into multiple shorter subtitles.
+
+    Args:
+        subtitles: List of subtitle dictionaries
+        max_length: Maximum length for subtitles (0 for auto-detection based on mean + std_dev)
+
+    Returns:
+        List of subtitle dictionaries with long subtitles split
+    """
+    print("Analyzing subtitle lengths for splitting...")
+
+    # Calculate mean and standard deviation
+    lengths = [len(s['text']) for s in subtitles]
+    mean_length = statistics.mean(lengths) if lengths else 0
+    std_dev = statistics.stdev(lengths) if len(lengths) > 1 else 0
+
+    # Use mean + std_dev as the threshold if max_length is not specified
+    if max_length <= 0:
+        max_length = int(mean_length + std_dev)
+
+    print(f"Mean subtitle length: {mean_length:.2f} characters")
+    print(f"Standard deviation: {std_dev:.2f} characters")
+    print(f"Maximum length threshold: {max_length} characters")
+
+    # Find long subtitles
+    long_subtitles = [s for s in subtitles if len(s['text']) > max_length]
+    print(
+        f"Found {len(long_subtitles)} subtitles longer than {max_length} characters")
+
+    if not long_subtitles:
+        return subtitles  # No long subtitles to split
+
+    # Process subtitles
+    new_subtitles = []
+    split_count = 0
+
+    for subtitle in subtitles:
+        text = subtitle['text']
+        timestamp = subtitle['timestamp']
+        start_time, end_time = timestamp.split(' --> ')
+
+        if len(text) > max_length:
+            # Split long subtitle
+            splits = split_subtitle(
+                int(subtitle['number']), start_time, end_time, text, max_length)
+            for split_start, split_end, split_text in splits:
+                new_subtitle = subtitle.copy()
+                new_subtitle['timestamp'] = f"{split_start} --> {split_end}"
+                new_subtitle['text'] = split_text
+                new_subtitles.append(new_subtitle)
+            split_count += 1
+        else:
+            # Keep short subtitle as is
+            new_subtitles.append(subtitle)
+
+    print(
+        f"✅ Split {split_count} long subtitles into {len(new_subtitles) - len(subtitles) + split_count} parts")
+    return new_subtitles
+
+
+def check_timestamps(srt_content):
+    """
+    Perform comprehensive validation of SRT timestamps and provide statistics.
+    This function does not modify the SRT content, only analyzes it.
+    """
+    print("\n📊 TIMESTAMP VALIDATION AND STATISTICS 📊")
+    print("═" * 60)
+
+    # Extract timestamps
+    timestamps = re.findall(
+        r'(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})', srt_content)
+
+    invalid = []
+    overlaps = []
+    durations = []
+    short_subtitles = []
+    min_duration_ms = 500  # 0.5 seconds
+
+    # Check for empty subtitles
+    empty_subtitles = re.findall(
+        r'\d+\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n\n', srt_content)
+    empty_count = len(empty_subtitles)
+
+    # Extract subtitle text for analysis
+    subtitle_blocks = re.split(r'\n\s*\n', srt_content.strip())
+    subtitle_texts = []
+    for block in subtitle_blocks:
+        lines = block.strip().split('\n')
+        if len(lines) >= 3:
+            text = '\n'.join(lines[2:]).strip()
+            subtitle_texts.append(text)
+
+    for i, (start, end) in enumerate(timestamps, 1):
+        start_ms = srt_time_to_ms(start)
+        end_ms = srt_time_to_ms(end)
+        duration_ms = end_ms - start_ms
+        durations.append(duration_ms)
+
+        if end_ms <= start_ms:
+            invalid.append((i, start, end, end_ms - start_ms))
+
+        if duration_ms < min_duration_ms:
+            short_subtitles.append((i, start, end, duration_ms))
+
+        if i < len(timestamps):
+            next_start = timestamps[i][0]
+            next_start_ms = srt_time_to_ms(next_start)
+
+            if end_ms > next_start_ms:
+                overlaps.append(
+                    (i, i+1, end, next_start, end_ms - next_start_ms))
+
+    # Calculate gaps between subtitles
+    gaps = []
+    for i in range(len(timestamps) - 1):
+        current_end_ms = srt_time_to_ms(timestamps[i][1])
+        next_start_ms = srt_time_to_ms(timestamps[i+1][0])
+        gap_ms = next_start_ms - current_end_ms
+        gaps.append(gap_ms)
+
+    # Print validation results
+    if invalid:
+        print('❌ Invalid timestamps found:')
+        for i, start, end, diff in invalid:
+            print(f'  Subtitle #{i}: {start} --> {end} (diff: {diff}ms)')
+    else:
+        print('✅ No invalid timestamps found')
+
+    if overlaps:
+        print('\n❌ Overlapping timestamps found:')
+        for i, j, end, next_start, diff in overlaps[:5]:  # Show first 5
+            print(
+                f'  Subtitle #{i} overlaps with #{j} by {diff}ms: {end} > {next_start}')
+        if len(overlaps) > 5:
+            print(f'  ... and {len(overlaps) - 5} more')
+    else:
+        print('\n✅ No overlapping timestamps found')
+
+    if short_subtitles:
+        print(
+            f'\n⚠️ Found {len(short_subtitles)} subtitles shorter than {min_duration_ms}ms:')
+        for i, start, end, duration in short_subtitles[:5]:  # Show first 5
+            print(
+                f'  Subtitle #{i}: {start} --> {end} (duration: {duration}ms)')
+        if len(short_subtitles) > 5:
+            print(f'  ... and {len(short_subtitles) - 5} more')
+    else:
+        print(f'\n✅ No subtitles shorter than {min_duration_ms}ms found')
+
+    if empty_count > 0:
+        print(f'\n⚠️ Found {empty_count} empty subtitles')
+    else:
+        print(f'\n✅ No empty subtitles found')
+
+    # Duration statistics
+    if durations:
+        avg_duration = sum(durations) / len(durations)
+        min_duration = min(durations)
+        max_duration = max(durations)
+
+        # Group durations into ranges
+        duration_ranges = {
+            '< 1s': 0,
+            '1-2s': 0,
+            '2-3s': 0,
+            '3-5s': 0,
+            '5-10s': 0,
+            '> 10s': 0
+        }
+
+        for d in durations:
+            if d < 1000:
+                duration_ranges['< 1s'] += 1
+            elif d < 2000:
+                duration_ranges['1-2s'] += 1
+            elif d < 3000:
+                duration_ranges['2-3s'] += 1
+            elif d < 5000:
+                duration_ranges['3-5s'] += 1
+            elif d < 10000:
+                duration_ranges['5-10s'] += 1
+            else:
+                duration_ranges['> 10s'] += 1
+
+        print('\n📈 Duration statistics:')
+        print(
+            f'  Average duration: {avg_duration:.2f}ms ({avg_duration/1000:.2f}s)')
+        print(
+            f'  Minimum duration: {min_duration}ms ({min_duration/1000:.2f}s)')
+        print(
+            f'  Maximum duration: {max_duration}ms ({max_duration/1000:.2f}s)')
+
+        print('\n📊 Duration distribution:')
+        for range_name, count in duration_ranges.items():
+            percentage = (count / len(durations)) * 100
+            print(f'  {range_name}: {count} subtitles ({percentage:.1f}%)')
+
+    # Gap statistics
+    if gaps:
+        avg_gap = sum(gaps) / len(gaps)
+        min_gap = min(gaps)
+        max_gap = max(gaps)
+
+        # Count negative gaps (overlaps)
+        negative_gaps = sum(1 for g in gaps if g < 0)
+
+        print('\n📏 Gap statistics:')
+        print(f'  Average gap: {avg_gap:.2f}ms ({avg_gap/1000:.2f}s)')
+        print(f'  Minimum gap: {min_gap}ms ({min_gap/1000:.2f}s)')
+        print(f'  Maximum gap: {max_gap}ms ({max_gap/1000:.2f}s)')
+        print(f'  Negative gaps (overlaps): {negative_gaps}')
+
+    # Text statistics
+    if subtitle_texts:
+        text_lengths = [len(text) for text in subtitle_texts]
+        avg_length = sum(text_lengths) / len(text_lengths)
+        max_length = max(text_lengths)
+
+        # Calculate standard deviation
+        std_dev = statistics.stdev(text_lengths) if len(
+            text_lengths) > 1 else 0
+
+        print('\n📝 Text statistics:')
+        print(f'  Average text length: {avg_length:.1f} characters')
+        print(f'  Standard deviation: {std_dev:.1f} characters')
+        print(f'  Maximum text length: {max_length} characters')
+
+        # Count long subtitles (> mean + std_dev)
+        threshold = avg_length + std_dev
+        long_count = sum(1 for length in text_lengths if length > threshold)
+        print(f'  Subtitles longer than {threshold:.1f} chars: {long_count}')
+
+    print("═" * 60)
+
+    # Return a summary of issues found
+    return {
+        'invalid': len(invalid),
+        'overlaps': len(overlaps),
+        'short': len(short_subtitles),
+        'empty': empty_count
+    }
+
+
 def display_menu():
     """Display the interactive CLI menu."""
     print("\n" + "="*60)
@@ -893,6 +1307,8 @@ def display_menu():
     print("  ✅ Timestamp adjustment")
     print("  ✅ Subtitle validation")
     print("  ✅ Automatic language detection")
+    print("  ✅ Long subtitle splitting")
+    print("  ✅ Timestamp validation and statistics")
 
     # Get input file
     while True:
@@ -937,6 +1353,22 @@ def display_menu():
     # Use default output directory without prompting
     output_dir = "output_srt_files"
 
+    # Ask about splitting long subtitles
+    split_long = input(
+        "\n🔪 Split long subtitles? (y/n) [default: y]: ").strip().lower() != 'n'
+
+    # Get max length if splitting is enabled
+    max_length = 0
+    if split_long:
+        max_length_input = input(
+            "   Maximum subtitle length (0 for auto-detection) [default: 0]: ").strip()
+        if max_length_input and max_length_input.isdigit():
+            max_length = int(max_length_input)
+
+    # Ask about timestamp checking
+    check_timestamps = input(
+        "\n📊 Perform comprehensive timestamp checking? (y/n) [default: y]: ").strip().lower() != 'n'
+
     # Confirm settings
     print("\n" + "-"*60)
     print("📋 Summary of settings:")
@@ -945,6 +1377,11 @@ def display_menu():
     print(f"   Source language: Auto-detect")
     print(f"   Target language: {target_language}")
     print(f"   Output directory: {output_dir}")
+    print(f"   Split long subtitles: {'Yes' if split_long else 'No'}")
+    if split_long:
+        print(
+            f"   Maximum subtitle length: {max_length if max_length > 0 else 'Auto-detect'}")
+    print(f"   Timestamp checking: {'Yes' if check_timestamps else 'No'}")
     print("-"*60)
 
     confirm = input("\n✅ Proceed with these settings? (y/n): ").strip().lower()
@@ -957,7 +1394,10 @@ def display_menu():
         'output_name': output_name,
         'language': None,  # Set to None for auto-detection
         'target_language': target_language,
-        'output_dir': output_dir
+        'output_dir': output_dir,
+        'no_split_long': not split_long,
+        'max_length': max_length,
+        'no_timestamp_check': not check_timestamps
     }
 
 
@@ -1070,6 +1510,12 @@ def process_with_args(args):
                 # Adjust timestamps
                 subtitles = adjust_timestamps(subtitles)
 
+                # Split long subtitles if enabled
+                if not hasattr(args, 'no_split_long') or not args.no_split_long:
+                    max_length = args.max_length if hasattr(
+                        args, 'max_length') else 0
+                    subtitles = split_long_subtitles(subtitles, max_length)
+
                 # Final conversion to SRT with strict chronological ordering
                 final_srt = subtitles_to_srt(subtitles)
 
@@ -1087,6 +1533,10 @@ def process_with_args(args):
 
                 # Validate the final SRT
                 validate_srt(fixed_srt)
+
+                # Perform comprehensive timestamp checking
+                if not hasattr(args, 'no_timestamp_check') or not args.no_timestamp_check:
+                    check_timestamps(fixed_srt)
 
                 # Write to file
                 with open(srt_path, "w") as srt_file:
@@ -1106,6 +1556,13 @@ def process_with_args(args):
                 subtitles = translate_subtitles(
                     client, subtitles, args.target_language)
                 subtitles = adjust_timestamps(subtitles)
+
+                # Split long subtitles if enabled
+                if not hasattr(args, 'no_split_long') or not args.no_split_long:
+                    max_length = args.max_length if hasattr(
+                        args, 'max_length') else 0
+                    subtitles = split_long_subtitles(subtitles, max_length)
+
                 final_srt = subtitles_to_srt(subtitles)
 
                 # Parse the final SRT to get subtitle objects for overlap fixing
@@ -1121,6 +1578,11 @@ def process_with_args(args):
                 fixed_srt = subtitles_to_srt(fixed_subtitles)
 
                 validate_srt(fixed_srt)
+
+                # Perform comprehensive timestamp checking
+                if not hasattr(args, 'no_timestamp_check') or not args.no_timestamp_check:
+                    check_timestamps(fixed_srt)
+
                 with open(srt_path, "w") as srt_file:
                     srt_file.write(fixed_srt)
                 print(f"SRT saved to '{srt_path}'.")
@@ -1157,6 +1619,12 @@ def main():
             "--output-dir", default="output_srt_files", help="Output directory")
         parser.add_argument("--interactive", action="store_true",
                             help="Use interactive menu instead of command line arguments")
+        parser.add_argument("--no-split-long", action="store_true",
+                            help="Disable splitting of long subtitles")
+        parser.add_argument("--max-length", type=int, default=0,
+                            help="Maximum length for subtitles (0 for auto-detection)")
+        parser.add_argument("--no-timestamp-check", action="store_true",
+                            help="Disable comprehensive timestamp checking")
 
         args = parser.parse_args()
 
