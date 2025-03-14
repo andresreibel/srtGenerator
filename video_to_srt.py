@@ -133,7 +133,8 @@ def translate_text(client, text, target_language):
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": f"Translate the following text to {target_language}. Preserve the original meaning and structure."},
+                {"role": "system",
+                    "content": f"Translate the following text to {target_language}. Preserve the original meaning and structure. Only translate meaningful speech, keep audio cues like [laughter] or [music] in brackets. If the text is gibberish, noise descriptions (like 'noises', 'sounds', etc.), or unintelligible, respond ONLY with [inaudible]. Only respond with the translation or audio cues, do not include any other text."},
                 {"role": "user", "content": text}
             ],
             temperature=0.3,
@@ -525,6 +526,129 @@ def transcribe_chunk(client, chunk_file, language, chunk_index=0):
         return {"content": "", "chunk_index": chunk_index}
 
 
+def fix_overlapping_subtitles(subtitles, gap_ms=20, min_duration_ms=500, chars_per_second=17):
+    """
+    Fix overlapping subtitles by considering word count and content length.
+    Only modifies overlapping subtitles while preserving chronological order.
+
+    Args:
+        subtitles: List of subtitle dictionaries
+        gap_ms: Desired gap between subtitles in milliseconds
+        min_duration_ms: Absolute minimum duration for any subtitle
+        chars_per_second: Reading speed in characters per second
+
+    Returns:
+        List of subtitles with overlaps fixed
+    """
+    # Ensure subtitles are sorted by start time
+    subtitles = sorted(subtitles, key=lambda x: srt_time_to_ms(
+        x['timestamp'].split(' --> ')[0]))
+
+    adjusted_count = 0
+
+    # Create a log file for timestamp changes
+    log_file_path = os.path.join("output_srt_files", "timestamp_fixes.log")
+    with open(log_file_path, "w") as log_file:
+        log_file.write("SUBTITLE TIMESTAMP FIXES\n")
+        log_file.write("=======================\n\n")
+
+        # Process each subtitle except the last one
+        for i in range(len(subtitles) - 1):
+            current = subtitles[i]
+            next_sub = subtitles[i + 1]
+
+            # Extract timestamps
+            current_start_str, current_end_str = current['timestamp'].split(
+                ' --> ')
+            next_start_str, next_end_str = next_sub['timestamp'].split(' --> ')
+
+            # Convert to milliseconds
+            current_start_ms = srt_time_to_ms(current_start_str)
+            current_end_ms = srt_time_to_ms(current_end_str)
+            next_start_ms = srt_time_to_ms(next_start_str)
+
+            # Check for overlap
+            if current_end_ms > next_start_ms:
+                # Log the overlap
+                overlap_ms = current_end_ms - next_start_ms
+                log_file.write(
+                    f"Subtitle #{current['number']} overlaps with #{next_sub['number']} by {overlap_ms}ms\n")
+                log_file.write(f"BEFORE: {current['timestamp']}\n")
+
+                # Store original timestamp for logging
+                original_timestamp = current['timestamp']
+
+                # Calculate word counts and character lengths
+                current_text = current['text']
+                next_text = next_sub['text']
+                current_word_count = len(current_text.split())
+                next_word_count = len(next_text.split())
+                current_char_count = len(current_text)
+                next_char_count = len(next_text)
+
+                # Calculate minimum reading time needed for each subtitle (in ms)
+                current_min_time = max(
+                    min_duration_ms, (current_char_count * 1000) // chars_per_second)
+                next_min_time = max(
+                    min_duration_ms, (next_char_count * 1000) // chars_per_second)
+
+                # Calculate current durations
+                current_duration = current_end_ms - current_start_ms
+
+                # Calculate overlap amount
+                overlap_ms = current_end_ms - next_start_ms
+
+                # Determine how to resolve the overlap based on content
+                if current_word_count >= next_word_count * 2:
+                    # Current subtitle has significantly more content, preserve more of its time
+                    # Adjust to minimize impact on the longer subtitle
+                    new_end_ms = next_start_ms - gap_ms
+
+                    # Ensure current subtitle still has its minimum needed time
+                    if new_end_ms - current_start_ms < current_min_time:
+                        # Can't shorten current subtitle enough, it needs more time
+                        new_end_ms = current_start_ms + current_min_time
+                        log_file.write(
+                            f"WARNING: Subtitle needs {current_min_time}ms for {current_word_count} words, overlap remains\n")
+                    else:
+                        # Update the timestamp
+                        current['timestamp'] = f"{current_start_str} --> {ms_to_srt_time(new_end_ms)}"
+                        adjusted_count += 1
+                else:
+                    # Next subtitle has similar or more content, or both are short
+                    # Simply end current subtitle before next one starts
+                    new_end_ms = next_start_ms - gap_ms
+
+                    # Ensure minimum duration
+                    if new_end_ms - current_start_ms < min_duration_ms:
+                        # If fixing would make subtitle too short, use minimum duration
+                        if current_start_ms + min_duration_ms < next_start_ms - gap_ms:
+                            new_end_ms = current_start_ms + min_duration_ms
+                        else:
+                            # We can't maintain minimum duration without overlap
+                            new_end_ms = next_start_ms - gap_ms
+
+                    # Update the timestamp
+                    current['timestamp'] = f"{current_start_str} --> {ms_to_srt_time(new_end_ms)}"
+                    adjusted_count += 1
+
+                # Log the change
+                log_file.write(f"AFTER:  {current['timestamp']}\n")
+                log_file.write(f"TEXT:   \"{current['text']}\"\n\n")
+
+                # Also print to console
+                print(
+                    f"Fixed overlap: #{current['number']} {original_timestamp} → {current['timestamp']}")
+
+    if adjusted_count > 0:
+        print(
+            f"✅ Fixed {adjusted_count} overlapping subtitles (see output_srt_files/timestamp_fixes.log for details)")
+    else:
+        print("✅ No overlapping subtitles found")
+
+    return subtitles
+
+
 def display_menu():
     """Display the interactive CLI menu."""
     print("\n" + "="*60)
@@ -579,14 +703,8 @@ def display_menu():
     print(
         f"\n📝 NOTE: Audio language will be automatically detected and translated to {COMMON_LANGUAGES.get(target_language, target_language)}.")
 
-    # Get output directory
-    output_dir = input("\n📂 Enter output directory [default: output_srt_files]: ").strip(
-    ) or "output_srt_files"
-
-    # Handle paths with quotes for output directory
-    if (output_dir.startswith("'") and output_dir.endswith("'")) or \
-       (output_dir.startswith('"') and output_dir.endswith('"')):
-        output_dir = output_dir[1:-1]  # Remove surrounding quotes
+    # Use default output directory without prompting
+    output_dir = "output_srt_files"
 
     # Confirm settings
     print("\n" + "-"*60)
@@ -724,12 +842,21 @@ def process_with_args(args):
                 # Final conversion to SRT with strict chronological ordering
                 final_srt = subtitles_to_srt(subtitles)
 
+                # Parse the final SRT to get subtitle objects for overlap fixing
+                final_subtitles = parse_srt(final_srt)
+
+                # Fix any overlapping subtitles
+                fixed_subtitles = fix_overlapping_subtitles(final_subtitles)
+
+                # Convert back to SRT format
+                fixed_srt = subtitles_to_srt(fixed_subtitles)
+
                 # Validate the final SRT
-                validate_srt(final_srt)
+                validate_srt(fixed_srt)
 
                 # Write to file
                 with open(srt_path, "w") as srt_file:
-                    srt_file.write(final_srt)
+                    srt_file.write(fixed_srt)
                 print(f"SRT saved to '{srt_path}'.")
         else:
             print(f"Audio size: {audio_size:.2f} MB. Processing directly.")
@@ -746,9 +873,19 @@ def process_with_args(args):
                     client, subtitles, args.target_language)
                 subtitles = adjust_timestamps(subtitles)
                 final_srt = subtitles_to_srt(subtitles)
-                validate_srt(final_srt)
+
+                # Parse the final SRT to get subtitle objects for overlap fixing
+                final_subtitles = parse_srt(final_srt)
+
+                # Fix any overlapping subtitles
+                fixed_subtitles = fix_overlapping_subtitles(final_subtitles)
+
+                # Convert back to SRT format
+                fixed_srt = subtitles_to_srt(fixed_subtitles)
+
+                validate_srt(fixed_srt)
                 with open(srt_path, "w") as srt_file:
-                    srt_file.write(final_srt)
+                    srt_file.write(fixed_srt)
                 print(f"SRT saved to '{srt_path}'.")
 
         total_time = time.time() - total_start_time

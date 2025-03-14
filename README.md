@@ -9,6 +9,8 @@ A command-line tool that generates SRT subtitle files from video files using Ope
 - Translation to any language supported by OpenAI's Whisper API
 - Support for absolute file paths and paths with special characters (including quoted paths)
 - Intelligent timestamp adjustment based on translated text length
+- **Content-aware overlap resolution** to fix overlapping subtitles
+- Detailed logging of timestamp adjustments and overlap fixes
 - Audio compression and chunking for large files
 - Parallel processing for faster transcription
 - Retry logic for API calls
@@ -58,7 +60,8 @@ This will guide you through the process with prompts for:
 - Input file path
 - Output name
 - Target language
-- Output directory
+
+The output directory is automatically set to `output_srt_files` for simplicity.
 
 ### Command Line Arguments
 
@@ -118,9 +121,10 @@ python video_to_srt.py mixed_audio.mp4 output_name --target-language es
 
 1. **Audio Extraction**: Converts video to audio using ffmpeg
 2. **Transcription with Auto-detection**: Uses OpenAI's Whisper API to automatically detect and transcribe audio
-3. **Translation**: Translates text to the target language using GPT-3.5 Turbo
+3. **Translation**: Translates text to the target language using GPT-3.5 Turbo with strict output formatting
 4. **Timestamp Adjustment**: Adjusts subtitle durations based on text length
-5. **Validation**: Checks for overlapping subtitles and other issues
+5. **Overlap Resolution**: Intelligently fixes overlapping subtitles based on content length and word count
+6. **Validation**: Checks for overlapping subtitles and other issues
 
 ### Large File Handling
 
@@ -130,6 +134,16 @@ For files larger than 25 MB (OpenAI's limit):
 2. If still too large, audio is split into 10-minute chunks
 3. Each chunk is processed in parallel
 4. Results are merged with proper timestamp adjustments
+
+### Overlap Resolution
+
+The script includes a sophisticated algorithm to fix overlapping subtitles:
+
+1. Detects overlaps between adjacent subtitles
+2. Analyzes content length and word count to make intelligent adjustments
+3. Prioritizes longer/more complex subtitles when resolving conflicts
+4. Maintains minimum duration requirements for readability
+5. Logs all changes to `output_srt_files/timestamp_fixes.log`
 
 ## Supported Languages
 
@@ -151,6 +165,8 @@ The script supports all languages supported by OpenAI's Whisper model. Common la
 - The tool will always translate to the specified target language
 - The maximum audio file size supported by OpenAI's API is 25 MB (handled automatically)
 - The quality of transcription depends on the audio quality and the Whisper model's capabilities
+- Translation is strictly formatted to return only translations or audio cues in brackets
+- Inaudible or noise sections are marked with [inaudible]
 
 ## Cost Considerations
 
@@ -163,7 +179,7 @@ The script supports all languages supported by OpenAI's Whisper model. Common la
 
 If your primary concern is making your content accessible to a global audience with minimal effort:
 
-1. Use `video_new.py` to generate a clean, consistent English SRT file (especially if your audio has mixed languages)
+1. Use `video_to_srt.py` to generate a clean, consistent English SRT file (especially if your audio has mixed languages)
 2. Upload this English SRT to YouTube
 3. Let viewers use YouTube's auto-translate feature as needed
 
@@ -179,3 +195,12 @@ When you upload an English SRT file to YouTube:
 - Select their preferred language from the list
 
 This provides accessibility in all languages YouTube supports without requiring you to create multiple SRT files.
+
+## Logging and Debugging
+
+The script creates detailed logs to help troubleshoot any issues:
+
+- **Timestamp Fixes**: `output_srt_files/timestamp_fixes.log` - Records all adjustments made to fix overlapping subtitles
+- **Console Output**: Provides real-time progress updates and statistics on overlaps fixed
+
+These logs are particularly useful for identifying and resolving issues with subtitle timing and overlaps.
