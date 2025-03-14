@@ -10,7 +10,8 @@ A command-line tool that generates SRT subtitle files from video files using Ope
 - Support for absolute file paths and paths with special characters (including quoted paths)
 - Intelligent timestamp adjustment based on translated text length
 - **Content-aware overlap resolution** to fix overlapping subtitles
-- Detailed logging of timestamp adjustments and overlap fixes
+- **Long subtitle splitting** for improved readability
+- Detailed console output of timestamp adjustments and fixes
 - Audio compression and chunking for large files
 - Parallel processing for faster transcription
 - Retry logic for API calls
@@ -124,8 +125,9 @@ python video_to_srt.py mixed_audio.mp4 output_name --target-language es
 2. **Transcription with Auto-detection**: Uses OpenAI's Whisper API to automatically detect and transcribe audio
 3. **Translation**: Translates text to the target language using GPT-3.5 Turbo with strict output formatting
 4. **Timestamp Adjustment**: Adjusts subtitle durations based on text length
-5. **Overlap Resolution**: Intelligently fixes overlapping subtitles based on content length and word count
-6. **Validation**: Checks for overlapping subtitles and other issues
+5. **Long Subtitle Splitting**: Intelligently splits long subtitles at natural language boundaries
+6. **Overlap Resolution**: Intelligently fixes overlapping subtitles based on content length and word count
+7. **Validation**: Checks for overlapping subtitles and other issues
 
 ### Large File Handling
 
@@ -144,7 +146,19 @@ The script includes a sophisticated algorithm to fix overlapping subtitles:
 2. Analyzes content length and word count to make intelligent adjustments
 3. Prioritizes longer/more complex subtitles when resolving conflicts
 4. Maintains minimum duration requirements for readability
-5. Logs all changes to `output_srt_files/timestamp_fixes.log`
+5. Provides detailed console output of all changes made
+
+### Long Subtitle Splitting
+
+The script automatically splits long subtitles for improved readability:
+
+1. Calculates a threshold based on mean subtitle length and standard deviation
+2. Identifies subtitles exceeding this threshold
+3. Splits long subtitles at natural language boundaries (sentences, clauses, or words)
+4. Distributes timing proportionally based on text length
+5. Maintains proper chronological order and subtitle numbering
+
+This feature significantly improves subtitle readability by breaking long blocks of text into manageable segments while preserving the original meaning and timing.
 
 ### Inaudible Marker Removal
 
@@ -210,12 +224,13 @@ This provides accessibility in all languages YouTube supports without requiring 
 
 ## Logging and Debugging
 
-The script creates detailed logs to help troubleshoot any issues:
+The script provides detailed console output to help troubleshoot any issues:
 
-- **Timestamp Fixes**: `output_srt_files/timestamp_fixes.log` - Records all adjustments made to fix overlapping subtitles
+- **Timestamp Fixes**: Displays all adjustments made to fix overlapping subtitles
+- **Subtitle Splitting**: Shows statistics on long subtitles that were split
 - **Console Output**: Provides real-time progress updates and statistics on overlaps fixed and [inaudible] markers removed
 
-These logs are particularly useful for identifying and resolving issues with subtitle timing and overlaps.
+These logs are particularly useful for identifying and resolving issues with subtitle timing, overlaps, and readability.
 
 ## License
 
