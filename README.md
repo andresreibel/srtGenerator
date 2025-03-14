@@ -15,6 +15,7 @@ A command-line tool that generates SRT subtitle files from video files using Ope
 - Parallel processing for faster transcription
 - Retry logic for API calls
 - Subtitle validation
+- **Automatic removal of [inaudible] markers** for cleaner subtitles
 
 ## Prerequisites
 
@@ -145,6 +146,17 @@ The script includes a sophisticated algorithm to fix overlapping subtitles:
 4. Maintains minimum duration requirements for readability
 5. Logs all changes to `output_srt_files/timestamp_fixes.log`
 
+### Inaudible Marker Removal
+
+The script automatically removes [inaudible] markers from subtitles:
+
+1. Completely removes standalone [inaudible] subtitles (preserving empty timestamps)
+2. Removes [inaudible] markers from within mixed content subtitles
+3. Maintains all subtitle timing and numbering
+4. Creates cleaner, more readable subtitles for viewers
+
+This feature ensures that viewers aren't distracted by [inaudible] markers while watching videos, while still preserving the proper timing and structure of the subtitles.
+
 ## Supported Languages
 
 The script supports all languages supported by OpenAI's Whisper model. Common language codes:
@@ -166,7 +178,7 @@ The script supports all languages supported by OpenAI's Whisper model. Common la
 - The maximum audio file size supported by OpenAI's API is 25 MB (handled automatically)
 - The quality of transcription depends on the audio quality and the Whisper model's capabilities
 - Translation is strictly formatted to return only translations or audio cues in brackets
-- Inaudible or noise sections are marked with [inaudible]
+- Inaudible or noise sections are marked with [inaudible] during processing but removed in the final output
 
 ## Cost Considerations
 
@@ -201,6 +213,34 @@ This provides accessibility in all languages YouTube supports without requiring 
 The script creates detailed logs to help troubleshoot any issues:
 
 - **Timestamp Fixes**: `output_srt_files/timestamp_fixes.log` - Records all adjustments made to fix overlapping subtitles
-- **Console Output**: Provides real-time progress updates and statistics on overlaps fixed
+- **Console Output**: Provides real-time progress updates and statistics on overlaps fixed and [inaudible] markers removed
 
 These logs are particularly useful for identifying and resolving issues with subtitle timing and overlaps.
+
+## License
+
+This project is licensed under the MIT License - see below for details:
+
+```
+MIT License
+
+Copyright (c) 2024
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

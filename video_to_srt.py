@@ -649,6 +649,26 @@ def fix_overlapping_subtitles(subtitles, gap_ms=20, min_duration_ms=500, chars_p
     return subtitles
 
 
+def remove_inaudible_markers(subtitles):
+    """Remove [inaudible] markers from subtitles while preserving timestamps."""
+    inaudible_count = 0
+
+    for subtitle in subtitles:
+        if subtitle['text'].strip() == "[inaudible]":
+            subtitle['text'] = ""
+            inaudible_count += 1
+        elif "[inaudible]" in subtitle['text']:
+            subtitle['text'] = subtitle['text'].replace(
+                "[inaudible]", "").strip()
+            inaudible_count += 1
+
+    if inaudible_count > 0:
+        print(
+            f"✅ Removed [inaudible] markers from {inaudible_count} subtitles")
+
+    return subtitles
+
+
 def display_menu():
     """Display the interactive CLI menu."""
     print("\n" + "="*60)
@@ -848,6 +868,9 @@ def process_with_args(args):
                 # Fix any overlapping subtitles
                 fixed_subtitles = fix_overlapping_subtitles(final_subtitles)
 
+                # Remove [inaudible] markers
+                fixed_subtitles = remove_inaudible_markers(fixed_subtitles)
+
                 # Convert back to SRT format
                 fixed_srt = subtitles_to_srt(fixed_subtitles)
 
@@ -879,6 +902,9 @@ def process_with_args(args):
 
                 # Fix any overlapping subtitles
                 fixed_subtitles = fix_overlapping_subtitles(final_subtitles)
+
+                # Remove [inaudible] markers
+                fixed_subtitles = remove_inaudible_markers(fixed_subtitles)
 
                 # Convert back to SRT format
                 fixed_srt = subtitles_to_srt(fixed_subtitles)
