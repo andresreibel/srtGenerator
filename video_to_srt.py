@@ -548,247 +548,123 @@ def fix_overlapping_subtitles(subtitles, gap_ms=20, min_duration_ms=500, chars_p
     adjusted_count = 0
     removed_count = 0
 
-    # Create a log file for timestamp changes
-    log_file_path = os.path.join("output_srt_files", "timestamp_fixes.log")
-    with open(log_file_path, "w") as log_file:
-        log_file.write("SUBTITLE TIMESTAMP FIXES\n")
-        log_file.write("=======================\n\n")
+    # Print header for timestamp fixes
+    print("\n📊 SUBTITLE TIMESTAMP FIXES 📊")
+    print("═" * 60)
 
-        # Process each subtitle except the last one
-        i = 0
-        while i < len(subtitles) - 1:
-            # Get previous, current, and next subtitles
-            prev_sub = subtitles[i-1] if i > 0 else None
-            current = subtitles[i]
-            next_sub = subtitles[i + 1]
+    # Process each subtitle except the last one
+    i = 0
+    while i < len(subtitles) - 1:
+        # Get previous, current, and next subtitles
+        prev_sub = subtitles[i-1] if i > 0 else None
+        current = subtitles[i]
+        next_sub = subtitles[i + 1]
 
-            # Extract timestamps
-            current_start_str, current_end_str = current['timestamp'].split(
-                ' --> ')
-            next_start_str, next_end_str = next_sub['timestamp'].split(' --> ')
+        # Extract timestamps
+        current_start_str, current_end_str = current['timestamp'].split(
+            ' --> ')
+        next_start_str, next_end_str = next_sub['timestamp'].split(' --> ')
 
-            # Get previous subtitle timestamps if available
-            prev_end_ms = None
+        # Get previous subtitle timestamps if available
+        prev_end_ms = None
+        if prev_sub:
+            prev_end_str = prev_sub['timestamp'].split(' --> ')[1]
+            prev_end_ms = srt_time_to_ms(prev_end_str)
+            prev_is_empty = prev_sub['text'].strip() == ""
+
+        # Convert to milliseconds
+        current_start_ms = srt_time_to_ms(current_start_str)
+        current_end_ms = srt_time_to_ms(current_end_str)
+        next_start_ms = srt_time_to_ms(next_start_str)
+        next_end_ms = srt_time_to_ms(next_end_str)
+
+        # Check if next subtitle is empty (was [inaudible])
+        next_is_empty = next_sub['text'].strip() == ""
+
+        # Check for overlap
+        if current_end_ms > next_start_ms:
+            # Log the overlap
+            overlap_ms = current_end_ms - next_start_ms
+            print(
+                f"🔄 Subtitle #{current['number']} overlaps with #{next_sub['number']} by {overlap_ms}ms")
+            print(f"   BEFORE: {current['timestamp']}")
+
+            # Store original timestamp for logging
+            original_timestamp = current['timestamp']
+
+            # Calculate word counts and character lengths
+            current_text = current['text']
+            next_text = next_sub['text']
+            current_word_count = len(current_text.split())
+            next_word_count = len(next_text.split())
+            current_char_count = len(current_text)
+            next_char_count = len(next_text)
+
+            # Calculate minimum reading time needed for each subtitle (in ms)
+            current_min_time = max(
+                min_duration_ms, (current_char_count * 1000) // chars_per_second)
+
+            # Check if we can use space from previous subtitle
+            prev_space_available = 0
             if prev_sub:
-                prev_end_str = prev_sub['timestamp'].split(' --> ')[1]
-                prev_end_ms = srt_time_to_ms(prev_end_str)
-                prev_is_empty = prev_sub['text'].strip() == ""
+                # Calculate gap between previous and current
+                prev_gap = current_start_ms - prev_end_ms
 
-            # Convert to milliseconds
-            current_start_ms = srt_time_to_ms(current_start_str)
-            current_end_ms = srt_time_to_ms(current_end_str)
-            next_start_ms = srt_time_to_ms(next_start_str)
-            next_end_ms = srt_time_to_ms(next_end_str)
+                # If previous is empty, we can remove it and use its space
+                if prev_is_empty:
+                    # Find the subtitle before previous
+                    before_prev_idx = i - 2
+                    if before_prev_idx >= 0:
+                        before_prev = subtitles[before_prev_idx]
+                        before_prev_end_str = before_prev['timestamp'].split(
+                            ' --> ')[1]
+                        before_prev_end_ms = srt_time_to_ms(
+                            before_prev_end_str)
 
-            # Check if next subtitle is empty (was [inaudible])
-            next_is_empty = next_sub['text'].strip() == ""
+                        # Calculate total available space
+                        prev_space_available = current_start_ms - before_prev_end_ms - gap_ms
 
-            # Check for overlap
-            if current_end_ms > next_start_ms:
-                # Log the overlap
-                overlap_ms = current_end_ms - next_start_ms
-                log_file.write(
-                    f"Subtitle #{current['number']} overlaps with #{next_sub['number']} by {overlap_ms}ms\n")
-                log_file.write(f"BEFORE: {current['timestamp']}\n")
+                        # Log the potential space
+                        print(
+                            f"   NOTE: Can use {prev_space_available}ms from empty previous subtitle #{prev_sub['number']}")
 
-                # Store original timestamp for logging
-                original_timestamp = current['timestamp']
-
-                # Calculate word counts and character lengths
-                current_text = current['text']
-                next_text = next_sub['text']
-                current_word_count = len(current_text.split())
-                next_word_count = len(next_text.split())
-                current_char_count = len(current_text)
-                next_char_count = len(next_text)
-
-                # Calculate minimum reading time needed for each subtitle (in ms)
-                current_min_time = max(
-                    min_duration_ms, (current_char_count * 1000) // chars_per_second)
-
-                # Check if we can use space from previous subtitle
-                prev_space_available = 0
-                if prev_sub:
-                    # Calculate gap between previous and current
-                    prev_gap = current_start_ms - prev_end_ms
-
-                    # If previous is empty, we can remove it and use its space
-                    if prev_is_empty:
-                        # Find the subtitle before previous
-                        before_prev_idx = i - 2
-                        if before_prev_idx >= 0:
-                            before_prev = subtitles[before_prev_idx]
-                            before_prev_end_str = before_prev['timestamp'].split(
-                                ' --> ')[1]
-                            before_prev_end_ms = srt_time_to_ms(
-                                before_prev_end_str)
-
-                            # Calculate total available space
-                            prev_space_available = current_start_ms - before_prev_end_ms - gap_ms
-
-                            # Log the potential space
-                            log_file.write(
-                                f"NOTE: Can use {prev_space_available}ms from empty previous subtitle #{prev_sub['number']}\n")
-
-                            # Remove the empty previous subtitle
-                            subtitles.pop(i-1)
-                            removed_count += 1
-                            i -= 1  # Adjust current index
-
-                            # Update current after removal
-                            current = subtitles[i]
-                            current_start_str, current_end_str = current['timestamp'].split(
-                                ' --> ')
-                            current_start_ms = srt_time_to_ms(
-                                current_start_str)
-                    else:
-                        # Just use the gap if previous is not empty
-                        prev_space_available = prev_gap - gap_ms if prev_gap > gap_ms else 0
-                        if prev_space_available > 0:
-                            log_file.write(
-                                f"NOTE: Can use {prev_space_available}ms gap from previous subtitle #{prev_sub['number']}\n")
-
-                # If next subtitle is empty, we can use its space
-                if next_is_empty:
-                    # Find the subtitle after next
-                    after_next_idx = i + 2
-                    if after_next_idx < len(subtitles):
-                        after_next = subtitles[after_next_idx]
-                        after_next_start_str = after_next['timestamp'].split(
-                            ' --> ')[0]
-                        after_next_start_ms = srt_time_to_ms(
-                            after_next_start_str)
-
-                        # Use space up to the start of the subtitle after next
-                        new_end_ms = after_next_start_ms - gap_ms
-
-                        # If we have space from previous, we can also adjust start time
-                        if prev_space_available > 0:
-                            # Calculate how much we need to shift start time
-                            needed_duration = current_min_time
-                            current_duration = current_end_ms - current_start_ms
-
-                            if current_duration < needed_duration:
-                                # Calculate how much additional time we need
-                                additional_needed = needed_duration - current_duration
-
-                                # Use as much as possible from previous space
-                                shift_start = min(
-                                    prev_space_available, additional_needed)
-                                new_start_ms = current_start_ms - shift_start
-
-                                # Update start time
-                                current_start_str = ms_to_srt_time(
-                                    new_start_ms)
-                                log_file.write(
-                                    f"NOTE: Shifted start time earlier by {shift_start}ms\n")
-
-                        # Update the timestamp
-                        current['timestamp'] = f"{current_start_str} --> {ms_to_srt_time(new_end_ms)}"
-                        adjusted_count += 1
-
-                        # Log the change and removal
-                        log_file.write(f"AFTER:  {current['timestamp']}\n")
-                        log_file.write(
-                            f"NOTE:   Removed empty subtitle #{next_sub['number']} to resolve overlap\n")
-                        log_file.write(f"TEXT:   \"{current['text']}\"\n\n")
-
-                        # Remove the empty subtitle
-                        subtitles.pop(i + 1)
+                        # Remove the empty previous subtitle
+                        subtitles.pop(i-1)
                         removed_count += 1
+                        i -= 1  # Adjust current index
 
-                        # Don't increment i since we removed a subtitle
-                        continue
-                    else:
-                        # No subtitle after next, just extend to the end of next
-                        new_end_ms = next_end_ms
-
-                        # If we have space from previous, we can also adjust start time
-                        if prev_space_available > 0:
-                            # Calculate how much we need to shift start time
-                            needed_duration = current_min_time
-                            current_duration = current_end_ms - current_start_ms
-
-                            if current_duration < needed_duration:
-                                # Calculate how much additional time we need
-                                additional_needed = needed_duration - current_duration
-
-                                # Use as much as possible from previous space
-                                shift_start = min(
-                                    prev_space_available, additional_needed)
-                                new_start_ms = current_start_ms - shift_start
-
-                                # Update start time
-                                current_start_str = ms_to_srt_time(
-                                    new_start_ms)
-                                log_file.write(
-                                    f"NOTE: Shifted start time earlier by {shift_start}ms\n")
-
-                        current['timestamp'] = f"{current_start_str} --> {ms_to_srt_time(new_end_ms)}"
-                        adjusted_count += 1
-
-                        # Log the change and removal
-                        log_file.write(f"AFTER:  {current['timestamp']}\n")
-                        log_file.write(
-                            f"NOTE:   Removed empty subtitle #{next_sub['number']} to resolve overlap\n")
-                        log_file.write(f"TEXT:   \"{current['text']}\"\n\n")
-
-                        # Remove the empty subtitle
-                        subtitles.pop(i + 1)
-                        removed_count += 1
-
-                        # Don't increment i since we removed a subtitle
-                        continue
-
-                # Original overlap resolution logic for non-empty subtitles
-                if current_word_count >= next_word_count * 2:
-                    # Current subtitle has significantly more content, preserve more of its time
-                    # Adjust to minimize impact on the longer subtitle
-                    new_end_ms = next_start_ms - gap_ms
-
-                    # If we have space from previous, we can also adjust start time
-                    if prev_space_available > 0:
-                        # Calculate how much we need to shift start time
-                        needed_duration = current_min_time
-                        current_duration = new_end_ms - current_start_ms  # Use new end time
-
-                        if current_duration < needed_duration:
-                            # Calculate how much additional time we need
-                            additional_needed = needed_duration - current_duration
-
-                            # Use as much as possible from previous space
-                            shift_start = min(
-                                prev_space_available, additional_needed)
-                            new_start_ms = current_start_ms - shift_start
-
-                            # Update start time
-                            current_start_str = ms_to_srt_time(new_start_ms)
-                            log_file.write(
-                                f"NOTE: Shifted start time earlier by {shift_start}ms\n")
-
-                    # Ensure current subtitle still has its minimum needed time
-                    current_duration = new_end_ms - \
-                        srt_time_to_ms(current_start_str)
-                    if current_duration < current_min_time:
-                        # Can't shorten current subtitle enough, it needs more time
-                        new_end_ms = srt_time_to_ms(
-                            current_start_str) + current_min_time
-                        log_file.write(
-                            f"WARNING: Subtitle needs {current_min_time}ms for {current_word_count} words, overlap remains\n")
-                    else:
-                        # Update the timestamp
-                        current['timestamp'] = f"{current_start_str} --> {ms_to_srt_time(new_end_ms)}"
-                        adjusted_count += 1
+                        # Update current after removal
+                        current = subtitles[i]
+                        current_start_str, current_end_str = current['timestamp'].split(
+                            ' --> ')
+                        current_start_ms = srt_time_to_ms(
+                            current_start_str)
                 else:
-                    # Next subtitle has similar or more content, or both are short
-                    # Simply end current subtitle before next one starts
-                    new_end_ms = next_start_ms - gap_ms
+                    # Just use the gap if previous is not empty
+                    prev_space_available = prev_gap - gap_ms if prev_gap > gap_ms else 0
+                    if prev_space_available > 0:
+                        print(
+                            f"   NOTE: Can use {prev_space_available}ms gap from previous subtitle #{prev_sub['number']}")
+
+            # If next subtitle is empty, we can use its space
+            if next_is_empty:
+                # Find the subtitle after next
+                after_next_idx = i + 2
+                if after_next_idx < len(subtitles):
+                    after_next = subtitles[after_next_idx]
+                    after_next_start_str = after_next['timestamp'].split(
+                        ' --> ')[0]
+                    after_next_start_ms = srt_time_to_ms(
+                        after_next_start_str)
+
+                    # Use space up to the start of the subtitle after next
+                    new_end_ms = after_next_start_ms - gap_ms
 
                     # If we have space from previous, we can also adjust start time
                     if prev_space_available > 0:
                         # Calculate how much we need to shift start time
                         needed_duration = current_min_time
-                        current_duration = new_end_ms - current_start_ms  # Use new end time
+                        current_duration = current_end_ms - current_start_ms
 
                         if current_duration < needed_duration:
                             # Calculate how much additional time we need
@@ -800,49 +676,172 @@ def fix_overlapping_subtitles(subtitles, gap_ms=20, min_duration_ms=500, chars_p
                             new_start_ms = current_start_ms - shift_start
 
                             # Update start time
-                            current_start_str = ms_to_srt_time(new_start_ms)
-                            log_file.write(
-                                f"NOTE: Shifted start time earlier by {shift_start}ms\n")
-
-                    # Ensure minimum duration
-                    current_duration = new_end_ms - \
-                        srt_time_to_ms(current_start_str)
-                    if current_duration < min_duration_ms:
-                        # If fixing would make subtitle too short, use minimum duration
-                        if srt_time_to_ms(current_start_str) + min_duration_ms < next_start_ms - gap_ms:
-                            new_end_ms = srt_time_to_ms(
-                                current_start_str) + min_duration_ms
-                        else:
-                            # We can't maintain minimum duration without overlap
-                            new_end_ms = next_start_ms - gap_ms
+                            current_start_str = ms_to_srt_time(
+                                new_start_ms)
+                            print(
+                                f"   NOTE: Shifted start time earlier by {shift_start}ms")
 
                     # Update the timestamp
                     current['timestamp'] = f"{current_start_str} --> {ms_to_srt_time(new_end_ms)}"
                     adjusted_count += 1
 
-                # Log the change
-                log_file.write(f"AFTER:  {current['timestamp']}\n")
-                log_file.write(f"TEXT:   \"{current['text']}\"\n\n")
+                    # Log the change and removal
+                    print(f"   AFTER: {current['timestamp']}")
+                    print(
+                        f"   NOTE: Removed empty subtitle #{next_sub['number']} to resolve overlap")
+                    print(f"   TEXT: \"{current['text']}\"")
 
-                # Also print to console
-                print(
-                    f"Fixed overlap: #{current['number']} {original_timestamp} → {current['timestamp']}")
+                    # Remove the empty subtitle
+                    subtitles.pop(i + 1)
+                    removed_count += 1
 
-            # Check if current subtitle is empty and next is not empty
-            elif current['text'].strip() == "" and next_sub['text'].strip() != "":
-                # Remove empty subtitle
-                log_file.write(
-                    f"Removing empty subtitle #{current['number']}\n")
-                log_file.write(f"TIMESTAMP: {current['timestamp']}\n\n")
+                    # Don't increment i since we removed a subtitle
+                    continue
+                else:
+                    # No subtitle after next, just extend to the end of next
+                    new_end_ms = next_end_ms
 
-                subtitles.pop(i)
-                removed_count += 1
+                    # If we have space from previous, we can also adjust start time
+                    if prev_space_available > 0:
+                        # Calculate how much we need to shift start time
+                        needed_duration = current_min_time
+                        current_duration = current_end_ms - current_start_ms
 
-                # Don't increment i since we removed a subtitle
-                continue
+                        if current_duration < needed_duration:
+                            # Calculate how much additional time we need
+                            additional_needed = needed_duration - current_duration
 
-            # Move to next subtitle
-            i += 1
+                            # Use as much as possible from previous space
+                            shift_start = min(
+                                prev_space_available, additional_needed)
+                            new_start_ms = current_start_ms - shift_start
+
+                            # Update start time
+                            current_start_str = ms_to_srt_time(
+                                new_start_ms)
+                            print(
+                                f"   NOTE: Shifted start time earlier by {shift_start}ms")
+
+                    current['timestamp'] = f"{current_start_str} --> {ms_to_srt_time(new_end_ms)}"
+                    adjusted_count += 1
+
+                    # Log the change and removal
+                    print(f"   AFTER: {current['timestamp']}")
+                    print(
+                        f"   NOTE: Removed empty subtitle #{next_sub['number']} to resolve overlap")
+                    print(f"   TEXT: \"{current['text']}\"")
+
+                    # Remove the empty subtitle
+                    subtitles.pop(i + 1)
+                    removed_count += 1
+
+                    # Don't increment i since we removed a subtitle
+                    continue
+
+            # Original overlap resolution logic for non-empty subtitles
+            if current_word_count >= next_word_count * 2:
+                # Current subtitle has significantly more content, preserve more of its time
+                # Adjust to minimize impact on the longer subtitle
+                new_end_ms = next_start_ms - gap_ms
+
+                # If we have space from previous, we can also adjust start time
+                if prev_space_available > 0:
+                    # Calculate how much we need to shift start time
+                    needed_duration = current_min_time
+                    current_duration = new_end_ms - current_start_ms  # Use new end time
+
+                    if current_duration < needed_duration:
+                        # Calculate how much additional time we need
+                        additional_needed = needed_duration - current_duration
+
+                        # Use as much as possible from previous space
+                        shift_start = min(
+                            prev_space_available, additional_needed)
+                        new_start_ms = current_start_ms - shift_start
+
+                        # Update start time
+                        current_start_str = ms_to_srt_time(new_start_ms)
+                        print(
+                            f"   NOTE: Shifted start time earlier by {shift_start}ms")
+
+                # Ensure current subtitle still has its minimum needed time
+                current_duration = new_end_ms - \
+                    srt_time_to_ms(current_start_str)
+                if current_duration < current_min_time:
+                    # Can't shorten current subtitle enough, it needs more time
+                    new_end_ms = srt_time_to_ms(
+                        current_start_str) + current_min_time
+                    print(
+                        f"   WARNING: Subtitle needs {current_min_time}ms for {current_word_count} words, overlap remains")
+                else:
+                    # Update the timestamp
+                    current['timestamp'] = f"{current_start_str} --> {ms_to_srt_time(new_end_ms)}"
+                    adjusted_count += 1
+            else:
+                # Next subtitle has similar or more content, or both are short
+                # Simply end current subtitle before next one starts
+                new_end_ms = next_start_ms - gap_ms
+
+                # If we have space from previous, we can also adjust start time
+                if prev_space_available > 0:
+                    # Calculate how much we need to shift start time
+                    needed_duration = current_min_time
+                    current_duration = new_end_ms - current_start_ms  # Use new end time
+
+                    if current_duration < needed_duration:
+                        # Calculate how much additional time we need
+                        additional_needed = needed_duration - current_duration
+
+                        # Use as much as possible from previous space
+                        shift_start = min(
+                            prev_space_available, additional_needed)
+                        new_start_ms = current_start_ms - shift_start
+
+                        # Update start time
+                        current_start_str = ms_to_srt_time(new_start_ms)
+                        print(
+                            f"   NOTE: Shifted start time earlier by {shift_start}ms")
+
+                # Ensure minimum duration
+                current_duration = new_end_ms - \
+                    srt_time_to_ms(current_start_str)
+                if current_duration < min_duration_ms:
+                    # If fixing would make subtitle too short, use minimum duration
+                    if srt_time_to_ms(current_start_str) + min_duration_ms < next_start_ms - gap_ms:
+                        new_end_ms = srt_time_to_ms(
+                            current_start_str) + min_duration_ms
+                    else:
+                        # We can't maintain minimum duration without overlap
+                        new_end_ms = next_start_ms - gap_ms
+
+                # Update the timestamp
+                current['timestamp'] = f"{current_start_str} --> {ms_to_srt_time(new_end_ms)}"
+                adjusted_count += 1
+
+            # Log the change
+            print(f"   AFTER: {current['timestamp']}")
+            print(f"   TEXT: \"{current['text']}\"")
+            print("─" * 60)
+
+            # Also print to console
+            print(
+                f"Fixed overlap: #{current['number']} {original_timestamp} → {current['timestamp']}")
+
+        # Check if current subtitle is empty and next is not empty
+        elif current['text'].strip() == "" and next_sub['text'].strip() != "":
+            # Remove empty subtitle
+            print(f"🗑️ Removing empty subtitle #{current['number']}")
+            print(f"   TIMESTAMP: {current['timestamp']}")
+            print("─" * 60)
+
+            subtitles.pop(i)
+            removed_count += 1
+
+            # Don't increment i since we removed a subtitle
+            continue
+
+        # Move to next subtitle
+        i += 1
 
     # Renumber subtitles sequentially after removals
     if removed_count > 0:
@@ -850,13 +849,14 @@ def fix_overlapping_subtitles(subtitles, gap_ms=20, min_duration_ms=500, chars_p
             subtitle['number'] = str(i)
 
     if adjusted_count > 0:
-        print(
-            f"✅ Fixed {adjusted_count} overlapping subtitles (see output_srt_files/timestamp_fixes.log for details)")
+        print(f"✅ Fixed {adjusted_count} overlapping subtitles")
     else:
         print("✅ No overlapping subtitles found")
 
     if removed_count > 0:
         print(f"✅ Removed {removed_count} empty subtitles to improve timing")
+
+    print("═" * 60)
 
     return subtitles
 
@@ -1096,15 +1096,15 @@ def split_long_subtitles(subtitles, max_length=0):
             # Split long subtitle
             splits = split_subtitle(
                 int(subtitle['number']), start_time, end_time, text, max_length)
-            for split_start, split_end, split_text in splits:
-                new_subtitle = subtitle.copy()
-                new_subtitle['timestamp'] = f"{split_start} --> {split_end}"
-                new_subtitle['text'] = split_text
-                new_subtitles.append(new_subtitle)
-            split_count += 1
-        else:
-            # Keep short subtitle as is
-            new_subtitles.append(subtitle)
+               for split_start, split_end, split_text in splits:
+                    new_subtitle = subtitle.copy()
+                    new_subtitle['timestamp'] = f"{split_start} --> {split_end}"
+                    new_subtitle['text'] = split_text
+                    new_subtitles.append(new_subtitle)
+                split_count += 1
+            else:
+                # Keep short subtitle as is
+                new_subtitles.append(subtitle)
 
     print(
         f"✅ Split {split_count} long subtitles into {len(new_subtitles) - len(subtitles) + split_count} parts")
